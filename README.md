@@ -4,20 +4,27 @@ Customers call the Sarvam voice agent to order food or book a table. When each
 call ends, Sarvam posts the captured details to this server, and the kitchen
 dashboard updates live.
 
-- **Dashboard** (`/`): cards for **Orders**, **New**, **Cooking** and **Completed**
-  for the day picked in the Orders card (today by default), plus that day's order
-  table with **Order ID, Customer name, Dish and Quantity**, type, total and status.
+- **Orders** (`/`): the day's order count and **New**, **Cooking**, **Completed** and
+  **Cancelled** totals for the picked date (today by default), then a card per order
+  with **Order ID, customer name, each dish and its quantity**, type and total.
   Orders arrive as **New**; staff click **Start cooking**, then **Mark completed**,
-  and the cards update at once. **Download CSV** exports every order between two dates.
-  Order IDs run in sequence with no gaps (ORD-1001, ORD-1002, ...).
-- **Tables** (`/tables`): a card per table (T-01 to T-12 across Main Hall, Patio and
-  Family Room) showing Available, Reserved or Occupied at the chosen date and time,
-  with the guest, time, party size and booking ID. Click a card to seat guests, free
-  the table, cancel, mark a no-show, or book it for someone. **+ New booking** picks
-  the smallest free table that fits. Bookings that could not get a table (for
-  example a late post-call booking) wait in a strip at the top for staff to assign.
-  Table bookings are listed below. Works on phones, supports light and dark mode,
-  and refreshes every 5 seconds.
+  and the counts update at once. Click a card for the full order (prices, GST,
+  address, notes, call summary). Filter by status, search by order ID, name, phone
+  or dish, and **Download CSV** for any date range. Order IDs run in sequence with
+  no gaps (ORD-1001, ORD-1002, ...). New orders are highlighted as they arrive.
+- **Tables** (`/tables`): a **Floor plan** with a card per table (T-01 to T-12 across
+  Main Hall, Patio and Family Room) showing Available, Reserved or Occupied at the
+  chosen date and time, with who booked it and when. Each reservation gets its own
+  colour. Click a table to book it (guest count, day and a time grid with taken
+  times struck through), seat the guests, free the table, cancel or mark a no-show.
+  **Reservations** lists the whole day's bookings with their source (voice agent or
+  front desk). Bookings that could not get a table wait in a strip at the top.
+- **Calls** (`/calls`): every call the voice agent finished (from the post-call
+  webhook), grouped by day, with its summary and links to the order or booking it
+  produced.
+- The pages share one design (Cormorant Garamond and DM Sans, cream and deep red),
+  work on phones with a bottom tab bar, support light and dark mode, and refresh on
+  their own (orders every 5 seconds, tables every 10, calls every 15).
 - **Sarvam-compatible API**: a post-call webhook plus the five agent tools
   (`get_menu`, `check_table_availability`, `create_booking`, `place_order`,
   `send_confirmation_sms`).

@@ -1,0 +1,62 @@
+/* Calls page */
+
+.calls-head { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 18px; align-items: stretch; }
+.calls-count {
+  display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  padding: 22px 26px; border-radius: 30px 30px 100px 30px; background: var(--night); color: var(--on-night);
+}
+.calls-count p { margin: 0; }
+.cc-num { font: 700 92px/0.82 var(--serif); }
+.cc-label { font-size: 15px; margin-top: 8px !important; }
+.cc-lines { font-size: 13px; line-height: 1.8; color: var(--night-muted); padding-right: 30px; }
+
+.calls-body { display: flex; gap: 28px; align-items: flex-start; margin-top: 28px; }
+.timeline { flex: 1; min-width: 0; }
+.timeline .skeleton { height: 96px; margin-bottom: 10px; border-radius: 18px; }
+.group-label { padding: 12px 0 2px; font-size: 11.5px; font-weight: 700; letter-spacing: 0.16em; color: var(--muted); text-transform: uppercase; }
+
+.crow {
+  display: flex; gap: 16px; width: 100%; padding: 0 12px; border: 0; border-radius: 18px;
+  background: transparent; color: inherit; text-align: left;
+}
+.crow:hover { background: var(--surface); }
+.crow[aria-current='true'] { background: var(--sand); }
+.crow .rail { display: flex; flex-direction: column; align-items: center; width: 12px; flex: none; padding-top: 22px; }
+.crow .rail i { width: 12px; height: 12px; border-radius: 50%; background: var(--dot, var(--faint)); border: 2px solid var(--bg); box-shadow: 0 0 0 1px var(--dot, var(--faint)); }
+.crow .rail b { flex: 1; width: 1.5px; background: var(--line-2); margin-top: 4px; }
+.crow .main { flex: 1; min-width: 0; padding: 16px 0; border-bottom: 1px solid var(--line); }
+.crow .top { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.crow .when { font-size: 14px; font-weight: 700; }
+.crow .when span { font-weight: 500; color: var(--muted); }
+.crow .summary { font-size: 15px; line-height: 1.45; margin-top: 6px; overflow-wrap: anywhere; }
+.crow .summary.none { color: var(--muted); font-style: italic; }
+.crow .foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 8px; font-size: 12.5px; color: var(--muted); }
+.crow .view { height: 34px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--line-2); background: var(--surface); font-weight: 600; font-size: 12.5px; display: flex; align-items: center; color: var(--ink); flex: none; }
+.tag.order { background: var(--brand-soft); color: var(--brand-ink); }
+.tag.booking { background: var(--ok-soft); color: var(--ok); }
+
+.call-panel {
+  width: 440px; flex: none; position: sticky; top: 96px; max-height: calc(100vh - 120px); overflow-y: auto;
+  border-radius: 30px 30px 30px 8px; background: var(--sand);
+}
+@media (max-width: 959px) { .call-panel { display: none; } }
+.cp-head { padding: 20px 22px 14px; border-bottom: 1px solid var(--line-2); }
+.cp-title { font: 700 30px/1 var(--serif); margin: 0; }
+.cp-sub { font-size: 13px; color: var(--muted); margin-top: 4px; }
+.cp-tags { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; }
+.cp-tags .tag { background: var(--surface); }
+.cp-tags .tag.order { background: var(--brand-soft); }
+.cp-tags .tag.booking { background: var(--ok-soft); }
+.cp-body { padding: 16px 18px 20px; display: grid; gap: 12px; }
+.cp-body .memo { margin: 0; background: var(--surface); }
+.outcome { display: grid; gap: 8px; }
+.outcome a, .outcome div {
+  display: flex; justify-content: space-between; align-items: center; gap: 12px;
+  padding: 14px 16px; border-radius: 16px; background: var(--surface); color: var(--ink); font-weight: 600;
+}
+.outcome a:hover { text-decoration: none; box-shadow: inset 0 0 0 1.5px var(--brand-ink); }
+.outcome small { display: block; font-size: 12px; color: var(--muted); font-weight: 500; }
+.outcome .go { color: var(--brand-ink); font-weight: 700; white-space: nowrap; }
+.cp-id { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+.drawer .cp-head { background: var(--bg); }
+.drawer .call-detail { background: var(--sand); min-height: 100%; }

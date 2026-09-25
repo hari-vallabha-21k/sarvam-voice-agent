@@ -161,7 +161,7 @@
     return today ? timeFmt.format(d) : `${dayFmt.format(d)}, ${timeFmt.format(d)}`;
   }
 
-  const STATUS_LABEL = { new: 'New', cooking: 'Cooking', completed: 'Completed', cancelled: 'Cancelled', confirmed: 'Confirmed', seated: 'Seated', no_show: 'No show' };
+  const STATUS_LABEL = { new: 'New', cooking: 'Cooking', completed: 'Completed', cancelled: 'Cancelled' };
 
   function actionButtons(o) {
     const id = esc(o.id);
@@ -191,17 +191,6 @@
       <td data-col="placed" class="nowrap muted">${esc(placed(o.created_at))}</td>
       <td data-col="status"><span class="pill ${esc(o.status)}">${esc(STATUS_LABEL[o.status] || o.status)}</span></td>
       <td data-col="actions"><div class="actions">${actionButtons(o)}</div></td>
-    </tr>`;
-  }
-
-  function bookingRow(b) {
-    return `<tr>
-      <td><span class="order-id">${esc(b.id)}</span></td>
-      <td><div class="cust-name">${esc(b.customer_name || 'Unknown caller')}</div>${b.customer_phone ? `<div class="cust-phone">${esc(b.customer_phone)}</div>` : ''}</td>
-      <td class="nowrap">${esc(b.booking_date)}</td>
-      <td class="nowrap">${esc(b.booking_time)}</td>
-      <td class="num">${esc(b.party_size ?? '–')}</td>
-      <td><span class="pill ${esc(b.status)}">${esc(STATUS_LABEL[b.status] || b.status)}</span></td>
     </tr>`;
   }
 
@@ -254,16 +243,10 @@
     renderOrders(orders);
   }
 
-  async function loadBookings() {
-    const { bookings } = await api('/api/bookings');
-    $('bookings-body').innerHTML = bookings.map(bookingRow).join('');
-    $('bookings-empty').hidden = bookings.length > 0;
-  }
-
   async function refresh() {
     const live = $('live');
     try {
-      await Promise.all([loadStats(), loadOrders(), loadBookings()]);
+      await Promise.all([loadStats(), loadOrders()]);
       live.className = 'live ok';
       $('live-text').textContent = `Live · updated ${timeFmt.format(new Date())}`;
     } catch (err) {

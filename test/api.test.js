@@ -118,18 +118,101 @@ test('place_order tool then webhook for the same call keeps one order', async (t
   assert.equal(list.body.orders.length, 1);
 });
 
-test('table availability and booking respect seat capacity', async (t) => {
-  const { server, call } = await startServer({ SEAT_CAPACITY: '10' });
+test('bookings take the smallest free table and suggest other times when full', async (t) => {
+  const { server, call, store } = await startServer();
   t.after(() => server.close());
-  const ok = await call('POST', '/api/tools/check_table_availability', { booking_date: '2030-01-05', booking_time: '19:30', party_size: 8 });
-  assert.equal(ok.body.available, true);
-  const booked = await call('POST', '/api/tools/create_booking', { customer_name: 'A', booking_date: '2030-01-05', booking_time: '19:30', party_size: 8 });
-  assert.equal(booked.status, 200);
-  const full = await call('POST', '/api/tools/check_table_availability', { booking_date: '2030-01-05', booking_time: '20:00', party_size: 4 });
+  // Two 8-seat tables in the default floor plan: T-06 and T-11, T-12 (three in total).
+  const big = { booking_date: '2030-01-05', booking_time: '19:30', party_size: 8, customer_name: 'Big party' };
+  const first = await call('POST', '/api/tools/create_booking', big);
+  assert.equal(first.status, 200);
+  assert.equal(first.body.table_id, 'T-06');
+  assert.match(first.body.message, /Booking BKG-501 is confirmed\. Table T-06 for 8 on Saturday 5 January at 7:30 PM/);
+  await call('POST', '/api/tools/create_booking', big);
+  await call('POST', '/api/tools/create_booking', big);
+  const full = await call('POST', '/api/tools/check_table_availability', { booking_date: '2030-01-05', booking_time: '20:00', party_size: 8 });
   assert.equal(full.body.available, false);
   assert.ok(full.body.alternative_times.length > 0);
+  assert.equal((await call('POST', '/api/tools/create_booking', big)).status, 409);
+
+  const small = await call('POST', '/api/tools/check_table_availability', { booking_date: '2030-01-05', booking_time: '8 pm', party_size: 2 });
+  assert.equal(small.body.available, true);
+  assert.equal(small.body.table_id, 'T-01');
+  const huge = await call('POST', '/api/tools/check_table_availability', { booking_date: '2030-01-05', booking_time: '20:00', party_size: 12 });
+  assert.match(huge.body.message, /largest table seats 8/);
   const closed = await call('POST', '/api/tools/check_table_availability', { booking_date: '2030-01-05', booking_time: '10:00', party_size: 2 });
   assert.equal(closed.body.available, false);
+  assert.match(closed.body.message, /We take table bookings from 12 PM to 2 PM, and from 7 PM to 9:30 PM/);
+  assert.equal((await call('POST', '/api/tools/create_booking', { ...big, booking_date: '2020-01-01' })).status, 400);
+  assert.equal(store.data.bookings.length, 3);
+});
+
+test('tables view shows reserved, occupied and available with guest details', async (t) => {
+  const { server, call } = await startServer();
+  t.after(() => server.close());
+  const book = (body) => call('POST', '/api/bookings', { booking_date: '2030-01-05', ...body });
+  const a = await book({ customer_name: 'Asha', customer_phone: '+919800000001', booking_time: '19:00', party_size: 4 });
+  const b = await book({ customer_name: 'Ravi', booking_time: '21:30', party_size: 5, table_id: 'T-05' });
+  assert.equal(a.body.table_id, 'T-01');
+  assert.equal(a.body.source, 'staff');
+  assert.equal(b.body.table_id, 'T-05');
+  assert.equal((await book({ customer_name: 'Clash', booking_time: '21:00', party_size: 2, table_id: 'T-05' })).status, 409);
+  assert.equal((await book({ customer_name: 'Too many', booking_time: '13:00', party_size: 7, table_id: 'T-01' })).status, 409);
+  assert.equal((await book({ booking_time: '13:00', party_size: 2 })).status, 400); // name required
+
+  const at = async (time) => (await call('GET', `/api/tables?date=2030-01-05&time=${time}`)).body;
+  let floor = await at('19:30');
+  const byId = (f, id) => f.tables.find((x) => x.id === id);
+  assert.equal(floor.tables.length, 12);
+  assert.deepEqual(floor.areas, ['Main Hall', 'Patio', 'Family Room']);
+  assert.equal(byId(floor, 'T-01').status, 'reserved');
+  assert.equal(byId(floor, 'T-01').current.customer_name, 'Asha');
+  assert.equal(byId(floor, 'T-05').status, 'available');
+  assert.equal(byId(floor, 'T-05').next.customer_name, 'Ravi');
+  assert.deepEqual(floor.summary, { total: 12, available: 11, reserved: 1, occupied: 0 });
+
+  // Seat Asha, then free the table.
+  assert.equal((await call('PATCH', `/api/bookings/${a.body.id}`, { status: 'seated' })).body.status, 'seated');
+  floor = await at('19:30');
+  assert.equal(byId(floor, 'T-01').status, 'occupied');
+  assert.equal((await call('PATCH', `/api/bookings/${a.body.id}`, { status: 'completed' })).body.status, 'completed');
+  assert.equal(byId(await at('19:30'), 'T-01').status, 'available');
+
+  // Move Ravi to a table that is free; moving onto a too-small table is refused.
+  assert.equal((await call('PATCH', `/api/bookings/${b.body.id}`, { table_id: 'T-09' })).body.table_id, 'T-09');
+  assert.equal((await call('PATCH', `/api/bookings/${b.body.id}`, { table_id: 'T-02' })).status, 409);
+  assert.equal((await call('PATCH', `/api/bookings/${b.body.id}`, { status: 'eaten' })).status, 400);
+  assert.equal((await call('GET', '/api/tables?time=25:00')).status, 400);
+});
+
+test('post-call webhook links the mid-call booking and falls back to an unassigned booking', async (t) => {
+  const { server, call } = await startServer();
+  t.after(() => server.close());
+  const made = await call('POST', '/api/tools/create_booking', { customer_name: 'Meera', booking_date: '2030-01-05', booking_time: '19:00', party_size: 2 });
+  const hook = await call('POST', '/api/sarvam/webhook', { booking_id: made.body.booking_id, call_summary: 'Booked a table' });
+  assert.equal(hook.body.booking.id, made.body.booking_id);
+
+  const late = await call('POST', '/api/sarvam/webhook', { call_id: 'z1', customer_name: 'Late', booking_date: '2030-01-05', booking_time: '23:30', party_size: 2 });
+  assert.equal(late.body.booking.table_id, null);
+  assert.match(late.body.booking.notes, /Needs a table/);
+  const floor = (await call('GET', '/api/tables?date=2030-01-05&time=19:00')).body;
+  assert.deepEqual(floor.unassigned.map((b) => b.customer_name), ['Late']);
+});
+
+test('dates and times spoken by callers are understood', () => {
+  const { normalizeDate, normalizeTime } = require('../src/app');
+  const { localDate } = require('../src/store');
+  const today = localDate(new Date(), 'Asia/Kolkata');
+  const plus = (n) => new Date(Date.parse(today) + n * 864e5).toISOString().slice(0, 10);
+  assert.equal(normalizeDate('today'), today);
+  assert.equal(normalizeDate('Tomorrow'), plus(1));
+  const sat = normalizeDate('saturday');
+  assert.equal(new Date(sat).getUTCDay(), 6);
+  assert.ok(sat >= today && sat <= plus(6));
+  assert.equal(normalizeDate('27/09/2030'), '2030-09-27');
+  assert.equal(normalizeDate('27 September 2030'), '2030-09-27');
+  assert.ok(normalizeDate('1 January') > today);
+  assert.equal(normalizeTime('8 pm'), '20:00');
+  assert.equal(normalizeTime('7:30 PM'), '19:30');
 });
 
 test('get_menu and send_confirmation_sms (log mode)', async (t) => {

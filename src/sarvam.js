@@ -174,6 +174,7 @@ function normalizeCall(body) {
   return {
     call_id: pick(vars, 'call_id', 'interaction_id', 'session_id', 'conversation_id', 'callSid', 'call_sid', 'id'),
     order_id: pick(vars, 'order_id'),
+    booking_id: pick(vars, 'booking_id'),
     customer_name: pick(vars, 'customer_name', 'user_name', 'caller_name'),
     customer_phone: pick(vars, 'customer_phone', 'phone', 'phone_number', 'user_phone', 'user_identifier', 'from', 'caller_number'),
     order_items: parseOrderItems(pick(vars, 'order_items', 'items', 'order_details', 'order')),

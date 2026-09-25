@@ -18,6 +18,14 @@
   --critical: #d03b3b;
   --critical-text: #a12828;
   --critical-soft: #fbe9e9;
+  --info: #2f6fe4;
+  --info-text: #1f55c0;
+  --info-soft: #e8f0fe;
+  --busy: #ea580c;
+  --busy-text: #c2410c;
+  --busy-soft: #fff0e6;
+  --table-wood: #fde3d3;
+  --table-chair: #f6c3a5;
   --shadow: 0 1px 2px rgba(20, 18, 12, 0.06);
   --radius: 12px;
 }
@@ -40,6 +48,14 @@
     --warning-soft: #332710;
     --critical-text: #f08080;
     --critical-soft: #3a1a1a;
+    --info: #5b8def;
+    --info-text: #8fb2f5;
+    --info-soft: #17233a;
+    --busy: #f97316;
+    --busy-text: #fb9a5b;
+    --busy-soft: #3a2415;
+    --table-wood: #4a3326;
+    --table-chair: #6b4531;
     --shadow: none;
   }
 }
@@ -61,6 +77,14 @@
   --warning-soft: #332710;
   --critical-text: #f08080;
   --critical-soft: #3a1a1a;
+  --info: #5b8def;
+  --info-text: #8fb2f5;
+  --info-soft: #17233a;
+  --busy: #f97316;
+  --busy-text: #fb9a5b;
+  --busy-soft: #3a2415;
+  --table-wood: #4a3326;
+  --table-chair: #6b4531;
   --shadow: none;
 }
 
@@ -106,6 +130,7 @@ h1, h2, p { margin: 0; }
 .icon-btn:hover { color: var(--text-primary); background: var(--surface-2); }
 
 main { max-width: 1280px; margin: 0 auto; padding: 24px; display: grid; gap: 24px; }
+main > .page-nav { justify-self: start; }
 
 /* KPI tiles */
 
@@ -188,11 +213,10 @@ tbody tr:hover td { background: color-mix(in srgb, var(--surface-2) 55%, transpa
 .pill.new::before { background: var(--accent); }
 .pill.cooking { background: var(--warning-soft); color: var(--warning-text); }
 .pill.cooking::before { background: var(--warning); }
-.pill.completed, .pill.seated { background: var(--good-soft); color: var(--good-text); }
-.pill.completed::before, .pill.seated::before { background: var(--good); }
+.pill.completed { background: var(--good-soft); color: var(--good-text); }
+.pill.completed::before { background: var(--good); }
 .pill.cancelled, .pill.no_show { background: var(--critical-soft); color: var(--critical-text); }
 .pill.cancelled::before, .pill.no_show::before { background: var(--critical); }
-.pill.confirmed { background: var(--accent-soft); color: var(--accent); }
 .type-tag { font-size: 12px; color: var(--text-secondary); text-transform: capitalize; white-space: nowrap; }
 
 .actions { display: flex; gap: 6px; justify-content: flex-end; }
@@ -212,6 +236,30 @@ tbody tr:hover td { background: color-mix(in srgb, var(--surface-2) 55%, transpa
 
 tr.flash td { animation: flash 2s ease-out; }
 @keyframes flash { from { background: var(--accent-soft); } to { background: transparent; } }
+
+/* Page tabs (Orders / Tables) */
+
+.page-nav {
+  display: inline-flex; gap: 4px; padding: 4px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow);
+}
+.page-nav a {
+  padding: 7px 16px; border-radius: 7px; font-size: 14px; font-weight: 550;
+  color: var(--text-secondary); text-decoration: none;
+}
+.page-nav a:hover { color: var(--text-primary); }
+.page-nav a[aria-current="page"] { background: var(--accent-soft); color: var(--accent); }
+.page-nav a:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Table and booking statuses */
+.pill.available { background: var(--good-soft); color: var(--good-text); }
+.pill.available::before { background: var(--good); }
+.pill.reserved, .pill.confirmed { background: var(--info-soft); color: var(--info-text); }
+.pill.reserved::before, .pill.confirmed::before { background: var(--info); }
+.pill.occupied, .pill.seated { background: var(--busy-soft); color: var(--busy-text); }
+.pill.occupied::before, .pill.seated::before { background: var(--busy); }
+.pill.left { background: var(--surface-2); color: var(--text-muted); }
+.pill.left::before { background: var(--text-muted); }
 
 /* Small screens: stack the order table into cards */
 

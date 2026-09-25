@@ -10,7 +10,9 @@ const { createApp } = require('./app');
 // otherwise the JSON file store.
 function createHandler(env = process.env) {
   const config = loadConfig(env);
-  const store = config.supabase.url ? new SupabaseStore(config.supabase) : new Store(config.dataFile);
+  const store = config.supabase.url
+    ? new SupabaseStore(config.supabase)
+    : new Store(config.dataFile, { bookingDurationMin: config.bookingDurationMin });
   return { config, store, handler: createApp({ store, config }) };
 }
 

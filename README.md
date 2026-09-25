@@ -10,6 +10,12 @@ dashboard updates live.
   Orders arrive as **New**; staff click **Start cooking**, then **Mark completed**,
   and the cards update at once. **Download CSV** exports every order between two dates.
   Order IDs run in sequence with no gaps (ORD-1001, ORD-1002, ...).
+- **Tables** (`/tables`): a card per table (T-01 to T-12 across Main Hall, Patio and
+  Family Room) showing Available, Reserved or Occupied at the chosen date and time,
+  with the guest, time, party size and booking ID. Click a card to seat guests, free
+  the table, cancel, mark a no-show, or book it for someone. **+ New booking** picks
+  the smallest free table that fits. Bookings that could not get a table (for
+  example a late post-call booking) wait in a strip at the top for staff to assign.
   Table bookings are listed below. Works on phones, supports light and dark mode,
   and refreshes every 5 seconds.
 - **Sarvam-compatible API**: a post-call webhook plus the five agent tools
@@ -44,16 +50,18 @@ Endpoints under `/api/sarvam` and `/api/tools` require
 |---|---|---|
 | POST | `/api/sarvam/webhook` | Post-call webhook. Creates the order and/or booking from agent variables |
 | GET/POST | `/api/tools/get_menu` | Menu with prices |
-| POST | `/api/tools/check_table_availability` | `booking_date`, `booking_time`, `party_size` → `available`, `alternative_times` |
-| POST | `/api/tools/create_booking` | Creates a table booking |
+| POST | `/api/tools/check_table_availability` | `booking_date`, `booking_time`, `party_size` → `available`, `table_id`, `alternative_times`, `message` |
+| POST | `/api/tools/create_booking` | Books the smallest free table that fits → `booking_id`, `table_id`, `message` |
 | POST | `/api/tools/place_order` | Sends an order to the kitchen (status `cooking`) |
 | POST | `/api/tools/send_confirmation_sms` | Texts the order or booking summary (Twilio, or logged when unset) |
 | GET | `/api/stats?date=YYYY-MM-DD` | For that day (default today): `orders`, `new`, `cooking`, `completed`, `cancelled`, plus `all_time_orders` |
 | GET | `/api/orders?date=&status=&q=` | Order list, newest first. `date` limits it to one day |
 | GET | `/api/orders/export?from=&to=` | CSV of orders placed between two dates (inclusive, max 366 days) |
 | PATCH | `/api/orders/:id` | `{ "status": "new" \| "cooking" \| "completed" \| "cancelled" }` |
-| GET | `/api/bookings` | Table bookings |
-| PATCH | `/api/bookings/:id` | `{ "status": "confirmed" \| "seated" \| "cancelled" \| "no_show" }` |
+| GET | `/api/tables?date=&time=` | Every table's state at that moment (default now), that day's bookings, and bookings waiting for a table |
+| GET | `/api/bookings?date=` | Table bookings |
+| POST | `/api/bookings` | Staff booking: `customer_name`, `customer_phone`, `booking_date`, `booking_time`, `party_size`, optional `table_id`, `notes` |
+| PATCH | `/api/bookings/:id` | `{ "status": "confirmed" \| "seated" \| "completed" \| "cancelled" \| "no_show" }` and/or `{ "table_id": "T-05" }` |
 | GET | `/api/calls` | Recent post-call webhook log |
 
 ### Webhook payload

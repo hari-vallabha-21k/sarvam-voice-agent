@@ -8,7 +8,7 @@
 // supabase/migrations only let rows through when it matches, so the
 // publishable key on its own can read or write nothing.
 
-const { matchesQuery } = require('./store');
+const { matchesQuery, tableTaken } = require('./store');
 
 const PAGE_SIZE = 1000; // PostgREST's default max rows per request
 
@@ -37,6 +37,8 @@ class SupabaseStore {
     const text = await res.text();
     const data = text ? JSON.parse(text) : null;
     if (!res.ok) {
+      // 23P01 is raised by the bookings trigger when a table is already taken.
+      if (data && data.code === '23P01') throw tableTaken();
       const err = new Error(`Database error: ${(data && (data.message || data.hint)) || res.status}`);
       err.status = 502;
       throw err;
@@ -95,7 +97,17 @@ class SupabaseStore {
     return q ? list.filter((o) => matchesQuery(o, q)) : list;
   }
 
+  // Tables
+
+  async listTables() {
+    return this.request('GET', '/tables?active=eq.true&order=sort.asc');
+  }
+
   // Bookings
+
+  async findBooking(id) {
+    return this.one(`/bookings?id=eq.${enc(id)}`);
+  }
 
   async createBooking(fields) {
     return this.insert('bookings', { status: 'confirmed', ...fields });
@@ -107,7 +119,7 @@ class SupabaseStore {
   }
 
   async updateBooking(id, patch) {
-    return this.update('bookings', id, patch);
+    return this.update('bookings', id, { ...patch, updated_at: new Date().toISOString() });
   }
 
   async listBookings({ date } = {}) {

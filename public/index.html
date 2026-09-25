@@ -25,6 +25,11 @@
   </header>
 
   <main>
+    <nav class="page-nav" aria-label="Dashboard pages">
+      <a href="/" aria-current="page">Orders</a>
+      <a href="/tables">Tables</a>
+    </nav>
+
     <section class="kpis" aria-label="Order summary">
       <article class="kpi kpi-orders">
         <div class="kpi-label kpi-label-row">
@@ -93,27 +98,6 @@
       </div>
     </section>
 
-    <section class="panel" aria-labelledby="bookings-title">
-      <div class="panel-head">
-        <h2 id="bookings-title">Table bookings</h2>
-      </div>
-      <div class="table-wrap">
-        <table class="bookings">
-          <thead>
-            <tr>
-              <th scope="col">Booking ID</th>
-              <th scope="col">Customer</th>
-              <th scope="col">Date</th>
-              <th scope="col">Time</th>
-              <th scope="col" class="num">Guests</th>
-              <th scope="col">Status</th>
-            </tr>
-          </thead>
-          <tbody id="bookings-body"></tbody>
-        </table>
-        <p class="empty" id="bookings-empty" hidden>No table bookings yet.</p>
-      </div>
-    </section>
   </main>
 
   <script src="app.js"></script>

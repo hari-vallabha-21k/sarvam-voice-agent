@@ -8,6 +8,7 @@ const { MENU, GST_RATE } = require('./menu');
 const { normalizeCall, parseOrderItems, computeTotals, normalizeOrderType, toPartySize } = require('./sarvam');
 const { sendSms } = require('./sms');
 const { localDate } = require('./store');
+const { ACTIVE, freeTables, tableState } = require('./tables');
 
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const STATIC_TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
@@ -16,6 +17,7 @@ const ORDER_STATUSES = ['new', 'cooking', 'completed', 'cancelled'];
 const OPEN_STATUSES = ['new', 'cooking'];
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_EXPORT_DAYS = 366;
+const BOOKING_STATUSES = ['confirmed', 'seated', 'completed', 'cancelled', 'no_show'];
 const NEGATIVE_DISPOSITIONS = ['order_cancelled', 'no_order', 'cancelled'];
 
 // A non-JSON reply, such as the CSV export.
@@ -55,7 +57,9 @@ function createApp({ store, config }) {
     ['GET', '/api/orders/:id', getOrder],
     ['PATCH', '/api/orders/:id', patchOrder],
     ['GET', '/api/bookings', listBookings],
+    ['POST', '/api/bookings', staffBooking],
     ['PATCH', '/api/bookings/:id', patchBooking],
+    ['GET', '/api/tables', listTables],
     ['GET', '/api/calls', listCalls],
     ['GET', '/api/health', () => ({ ok: true })],
   ];
@@ -94,18 +98,13 @@ function createApp({ store, config }) {
       result.order = await store.createOrder(orderFields(call, 'sarvam_call_end'));
     }
 
-    if (call.booking_date && call.booking_time) {
-      result.booking =
-        (await store.findBookingByCall(call.call_id)) ||
-        (await store.createBooking({
-          call_id: call.call_id || null,
-          customer_name: call.customer_name || null,
-          customer_phone: call.customer_phone || null,
-          booking_date: normalizeDate(call.booking_date) || call.booking_date,
-          booking_time: normalizeTime(call.booking_time) || call.booking_time,
-          party_size: call.party_size,
-          source: 'sarvam_call_end',
-        }));
+    // create_booking may already have run during the call (Sarvam sends back its booking_id).
+    const existingBooking =
+      (call.booking_id && (await store.findBooking(call.booking_id))) || (await store.findBookingByCall(call.call_id));
+    if (existingBooking) {
+      result.booking = existingBooking;
+    } else if (call.booking_date && call.booking_time) {
+      result.booking = await bookFromCall(call);
     }
 
     await store.logCall({
@@ -148,61 +147,154 @@ function createApp({ store, config }) {
   }
 
   async function checkTableAvailability(req, { body }) {
-    const date = normalizeDate(body.booking_date || body.date);
-    const time = normalizeTime(body.booking_time || body.time);
-    const party = toPartySize(body.party_size || body.guests);
-    if (!date || !time || !party) {
-      throw new HttpError(400, 'booking_date (YYYY-MM-DD), booking_time (HH:MM) and party_size are required');
-    }
-    const bookings = await store.listBookings({ date });
-    const requested = slotStatus(bookings, time, party);
-    const alternatives = requested.available
-      ? []
-      : candidateSlots(time)
-          .filter((t) => slotStatus(bookings, t, party).available)
-          .slice(0, 3);
+    const { date, time, party } = bookingRequest(body);
+    const check = await availability(date, time, party);
     return {
-      available: requested.available,
+      available: check.available,
       booking_date: date,
       booking_time: time,
       party_size: party,
-      seats_left: requested.seats_left,
-      alternative_times: alternatives,
-      message: requested.available
-        ? `A table for ${party} is available on ${date} at ${time}.`
-        : requested.reason ||
-          (alternatives.length
-            ? `That time is full. Available times are ${alternatives.join(', ')}.`
-            : `Sorry, there are no tables for ${party} on ${date}.`),
+      table_id: check.table ? check.table.id : null,
+      alternative_times: check.alternatives,
+      message: check.message,
     };
   }
 
   async function createBooking(req, { body }) {
     const call = normalizeCall(body);
-    const date = normalizeDate(call.booking_date);
-    const time = normalizeTime(call.booking_time);
-    if (!date || !time || !call.party_size) {
-      throw new HttpError(400, 'booking_date, booking_time and party_size are required');
-    }
-    const status = slotStatus(await store.listBookings({ date }), time, call.party_size);
-    if (!status.available) {
-      throw new HttpError(409, status.reason || 'That slot is fully booked. Please pick another time.');
-    }
-    const booking = await store.createBooking({
-      call_id: call.call_id || null,
+    const booking = await reserveTable({
+      ...bookingRequest(body),
       customer_name: call.customer_name || null,
       customer_phone: call.customer_phone || null,
-      booking_date: date,
-      booking_time: time,
-      party_size: call.party_size,
       notes: call.notes || null,
+      call_id: call.call_id || null,
       source: 'sarvam_tool',
     });
+    return { ...booking, booking_id: booking.id, message: confirmation(booking) };
+  }
+
+  // Booking made by staff from the Tables page. table_id is optional; without it the best table is picked.
+  async function staffBooking(req, { body }) {
+    const name = String(body.customer_name || '').trim();
+    if (!name) throw new HttpError(400, 'Guest name is required');
+    const booking = await reserveTable({
+      ...bookingRequest(body),
+      table_id: body.table_id || null,
+      customer_name: name,
+      customer_phone: String(body.customer_phone || '').trim() || null,
+      notes: String(body.notes || '').trim() || null,
+      call_id: null,
+      source: 'staff',
+    });
+    return { ...booking, message: confirmation(booking) };
+  }
+
+  function bookingRequest(body) {
+    const date = normalizeDate(body.booking_date || body.date, config.timeZone);
+    const time = normalizeTime(body.booking_time || body.time);
+    const party = toPartySize(body.party_size || body.guests);
+    if (!date || !time || !party) {
+      throw new HttpError(400, 'booking_date (YYYY-MM-DD), booking_time (HH:MM) and party_size are required');
+    }
+    if (date < today()) throw new HttpError(400, 'That date has already passed. Please choose today or a later date.');
+    return { date, time, party };
+  }
+
+  // Can `party` be seated at `time`? Picks the smallest free table and, when
+  // nothing fits, up to three nearby times that do.
+  async function availability(date, time, party) {
+    const hoursMessage = outsideHours(time);
+    const tables = await store.listTables();
+    const largest = Math.max(0, ...tables.map((t) => t.seats));
+    if (hoursMessage) return { available: false, table: null, alternatives: [], message: hoursMessage };
+    if (party > largest) {
+      return {
+        available: false, table: null, alternatives: [],
+        message: `Our largest table seats ${largest}. For a bigger group, a staff member will call back to arrange it.`,
+      };
+    }
+    const dayBookings = await store.listBookings({ date });
+    const table = freeTables(tables, dayBookings, time, party, config.bookingDurationMin)[0] || null;
+    if (table) {
+      return { available: true, table, alternatives: [], message: `A table for ${party} is available on ${spokenDate(date)} at ${spokenTime(time)}.` };
+    }
+    const alternatives = candidateSlots(time)
+      .filter((t) => freeTables(tables, dayBookings, t, party, config.bookingDurationMin).length)
+      .slice(0, 3);
     return {
-      ...booking,
-      booking_id: booking.id,
-      message: `Booking ${booking.id} confirmed for ${booking.party_size} on ${date} at ${time}.`,
+      available: false, table: null, alternatives,
+      message: alternatives.length
+        ? `That time is fully booked. Tables for ${party} are free at ${alternatives.map(spokenTime).join(', ')}.`
+        : `Sorry, there are no tables for ${party} on ${spokenDate(date)}.`,
     };
+  }
+
+  // Books a specific table, or the best free one. If two bookings race for the
+  // same table, the loser moves on to the next free table.
+  async function reserveTable({ date, time, party, table_id, ...guest }) {
+    const hoursMessage = outsideHours(time);
+    if (hoursMessage) throw new HttpError(409, hoursMessage);
+    const tables = await store.listTables();
+    let candidates;
+    if (table_id) {
+      const table = tables.find((t) => t.id === table_id);
+      if (!table) throw new HttpError(404, `Table ${table_id} does not exist`);
+      if (table.seats < party) throw new HttpError(409, `Table ${table.id} seats ${table.seats}, not ${party}.`);
+      candidates = [table];
+    } else {
+      candidates = freeTables(tables, await store.listBookings({ date }), time, party, config.bookingDurationMin);
+    }
+    for (const table of candidates) {
+      try {
+        return await store.createBooking({
+          ...guest,
+          table_id: table.id,
+          booking_date: date,
+          booking_time: time,
+          party_size: party,
+        });
+      } catch (err) {
+        if (err.code !== 'table_taken') throw err;
+      }
+    }
+    if (table_id) throw new HttpError(409, `Table ${table_id} is already booked around ${spokenTime(time)}.`);
+    const check = await availability(date, time, party);
+    throw new HttpError(409, check.message);
+  }
+
+  // Post-call webhook fallback: book a table if one is free, otherwise keep the
+  // request without a table so staff can see it and assign one.
+  async function bookFromCall(call) {
+    const guest = {
+      customer_name: call.customer_name || null,
+      customer_phone: call.customer_phone || null,
+      call_id: call.call_id || null,
+      source: 'sarvam_call_end',
+    };
+    try {
+      return await reserveTable({ ...bookingRequest(call), ...guest });
+    } catch (err) {
+      if (!(err instanceof HttpError)) throw err;
+      return store.createBooking({
+        ...guest,
+        table_id: null,
+        booking_date: normalizeDate(call.booking_date, config.timeZone) || call.booking_date,
+        booking_time: normalizeTime(call.booking_time) || call.booking_time,
+        party_size: call.party_size,
+        notes: `Needs a table: ${err.message}`,
+      });
+    }
+  }
+
+  function outsideHours(time) {
+    const mins = toMinutes(time);
+    const open = config.openingHours.some(([from, to]) => mins >= toMinutes(from) && mins + config.bookingDurationMin <= toMinutes(to));
+    if (open) return null;
+    return `We take table bookings from ${config.openingHours.map(([a, b]) => `${spokenTime(a)} to ${spokenTime(fromMinutes(toMinutes(b) - config.bookingDurationMin))}`).join(', and from ')}.`;
+  }
+
+  function confirmation(b) {
+    return `Booking ${b.id} is confirmed. Table ${b.table_id} for ${b.party_size} on ${spokenDate(b.booking_date)} at ${spokenTime(b.booking_time)}.`;
   }
 
   async function placeOrder(req, { body }) {
@@ -324,16 +416,68 @@ function createApp({ store, config }) {
   }
 
   async function listBookings(req, { query }) {
-    return { bookings: await store.listBookings({ date: query.get('date') || undefined }) };
+    return { bookings: await store.listBookings({ date: dateParam(query, 'date') || undefined }) };
   }
 
+  // Status changes (seat, free, cancel, no-show) and moving a booking to another table.
   async function patchBooking(req, { params, body }) {
-    if (!['confirmed', 'seated', 'cancelled', 'no_show'].includes(body.status)) {
-      throw new HttpError(400, 'status must be confirmed, seated, cancelled or no_show');
-    }
-    const booking = await store.updateBooking(params.id, { status: body.status });
+    const booking = await store.findBooking(params.id);
     if (!booking) throw new HttpError(404, 'Booking not found');
-    return booking;
+    const patch = {};
+    if (body.status !== undefined) {
+      if (!BOOKING_STATUSES.includes(body.status)) throw new HttpError(400, `status must be one of ${BOOKING_STATUSES.join(', ')}`);
+      patch.status = body.status;
+    }
+    if (body.table_id !== undefined) {
+      const table = (await store.listTables()).find((t) => t.id === body.table_id);
+      if (!table) throw new HttpError(404, `Table ${body.table_id} does not exist`);
+      if (booking.party_size && table.seats < booking.party_size) {
+        throw new HttpError(409, `Table ${table.id} seats ${table.seats}, not ${booking.party_size}.`);
+      }
+      patch.table_id = table.id;
+    }
+    if (!Object.keys(patch).length) throw new HttpError(400, 'Nothing to change');
+    try {
+      return await store.updateBooking(params.id, patch);
+    } catch (err) {
+      if (err.code === 'table_taken') throw new HttpError(409, err.message);
+      throw err;
+    }
+  }
+
+  // The floor for one moment: every table with its state at ?date= and ?time=
+  // (defaults: now), that day's bookings, and bookings still waiting for a table.
+  async function listTables(req, { query }) {
+    const now = nowParts();
+    const date = dateParam(query, 'date') || now.date;
+    const timeParam = query.get('time');
+    const time = timeParam ? normalizeTime(timeParam) : now.time;
+    if (!time) throw new HttpError(400, 'time must be HH:MM');
+    const [tables, dayBookings] = await Promise.all([store.listTables(), store.listBookings({ date })]);
+    const opts = { durationMin: config.bookingDurationMin, isToday: date === now.date };
+    const floor = tables.map((t) => ({ ...t, ...tableState(t, dayBookings, time, opts) }));
+    const count = (s) => floor.filter((t) => t.status === s).length;
+    return {
+      date,
+      time,
+      is_now: !timeParam && date === now.date,
+      booking_duration_min: config.bookingDurationMin,
+      opening_hours: config.openingHours,
+      slots: candidateSlots('00:00').sort(),
+      areas: [...new Set(tables.map((t) => t.area))],
+      summary: { total: floor.length, available: count('available'), reserved: count('reserved'), occupied: count('occupied') },
+      tables: floor,
+      unassigned: dayBookings.filter((b) => !b.table_id && ACTIVE.includes(b.status)),
+    };
+  }
+
+  function nowParts() {
+    const parts = Object.fromEntries(
+      new Intl.DateTimeFormat('en-GB', { timeZone: config.timeZone, hourCycle: 'h23', hour: '2-digit', minute: '2-digit' })
+        .formatToParts(new Date())
+        .map((p) => [p.type, p.value])
+    );
+    return { date: today(), time: `${parts.hour}:${parts.minute}` };
   }
 
   async function listCalls(req, { query }) {
@@ -341,24 +485,9 @@ function createApp({ store, config }) {
     return { calls: await store.recentCalls(limit) };
   }
 
-  // ---------- Table capacity ----------
+  // ---------- Booking slots ----------
 
-  // `bookings` are that day's bookings, fetched once by the caller.
-  function slotStatus(bookings, time, party) {
-    const mins = toMinutes(time);
-    const open = config.openingHours.some(([from, to]) => mins >= toMinutes(from) && mins + config.bookingDurationMin <= toMinutes(to));
-    if (!open) {
-      const hours = config.openingHours.map(([a, b]) => `${a} to ${b}`).join(' and ');
-      return { available: false, seats_left: 0, reason: `We take bookings between ${hours}.` };
-    }
-    const taken = bookings
-      .filter((b) => b.status !== 'cancelled' && b.status !== 'no_show')
-      .filter((b) => Math.abs(toMinutes(b.booking_time) - mins) < config.bookingDurationMin)
-      .reduce((sum, b) => sum + (b.party_size || 0), 0);
-    const seatsLeft = Math.max(0, config.seatCapacity - taken);
-    return { available: party <= seatsLeft, seats_left: seatsLeft };
-  }
-
+  // Every half-hour start time inside opening hours, nearest to `time` first.
   function candidateSlots(time) {
     const base = toMinutes(time);
     const out = [];
@@ -438,7 +567,8 @@ function send(res, status, payload) {
 }
 
 function serveStatic(pathname, res) {
-  const rel = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
+  let rel = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
+  if (!path.extname(rel)) rel += '.html'; // /tables -> tables.html
   const file = path.normalize(path.join(PUBLIC_DIR, rel));
   if (!file.startsWith(PUBLIC_DIR) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) {
     return send(res, 404, { ok: false, error: 'Not found' });
@@ -498,18 +628,46 @@ function normalizeTime(v) {
   return fromMinutes(h * 60 + min);
 }
 
-// "2026-09-27", "27/09/2026", "27-09-2026" -> "2026-09-27"
-function normalizeDate(v) {
+const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+
+// "2026-09-27", "27/09/2026", "today", "tomorrow", "saturday", "next friday",
+// "27 September" -> "2026-09-27". Relative words use the restaurant's time zone.
+function normalizeDate(v, timeZone = 'Asia/Kolkata') {
   if (!v) return null;
-  const s = String(v).trim();
-  const rel = { today: 0, tomorrow: 1, 'day after tomorrow': 2 }[s.toLowerCase()];
-  if (rel !== undefined) return new Date(Date.now() + rel * 864e5).toISOString().slice(0, 10);
+  const s = String(v).trim().toLowerCase().replace(/\s+/g, ' ');
+  const today = localDate(new Date(), timeZone);
+  const addDays = (n) => new Date(Date.parse(today) + n * 864e5).toISOString().slice(0, 10);
+  const rel = { today: 0, tonight: 0, tomorrow: 1, 'day after tomorrow': 2 }[s];
+  if (rel !== undefined) return addDays(rel);
+  const wd = s.match(/^(?:this |next |coming )?(sunday|monday|tuesday|wednesday|thursday|friday|saturday)$/);
+  if (wd) {
+    const diff = (WEEKDAYS.indexOf(wd[1]) - new Date(today).getUTCDay() + 7) % 7;
+    return addDays(diff === 0 && s.startsWith('next') ? 7 : diff);
+  }
   let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
   if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
   m = s.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
   if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
-  const d = new Date(s);
-  return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+  const hasYear = /\b\d{4}\b/.test(s);
+  const d = new Date(hasYear ? s : `${s} ${today.slice(0, 4)}`);
+  if (Number.isNaN(d.getTime())) return null;
+  let out = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  // "5 January" said in December means next year.
+  if (!hasYear && out < today) out = `${d.getFullYear() + 1}${out.slice(4)}`;
+  return out;
+}
+
+// "2026-09-27" -> "Sunday 27 September", for the agent to read out.
+function spokenDate(date) {
+  return new Intl.DateTimeFormat('en-GB', { timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long' }).format(new Date(date));
+}
+
+// "19:30" -> "7:30 PM"
+function spokenTime(time) {
+  const mins = toMinutes(time);
+  const h = Math.floor(mins / 60) % 24;
+  const m = mins % 60;
+  return `${h % 12 || 12}${m ? `:${String(m).padStart(2, '0')}` : ''} ${h < 12 ? 'AM' : 'PM'}`;
 }
 
 // Midnight of YYYY-MM-DD in `timeZone`, as a Date.

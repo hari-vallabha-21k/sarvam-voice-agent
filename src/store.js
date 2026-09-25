@@ -5,13 +5,15 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { DEFAULT_TABLES, ACTIVE, overlaps } = require('./tables');
 
-const EMPTY = () => ({ counters: { order: 1000, booking: 500 }, orders: [], bookings: [], calls: [], sms: [] });
+const EMPTY = () => ({ counters: { order: 1000, booking: 500 }, tables: DEFAULT_TABLES.map((t) => ({ ...t })), orders: [], bookings: [], calls: [], sms: [] });
 const MAX_CALL_LOG = 500;
 
 class Store {
-  constructor(file) {
+  constructor(file, { bookingDurationMin = 90 } = {}) {
     this.file = file;
+    this.bookingDurationMin = bookingDurationMin;
     this.data = EMPTY();
     if (file && fs.existsSync(file)) {
       this.data = { ...EMPTY(), ...JSON.parse(fs.readFileSync(file, 'utf8')) };
@@ -75,18 +77,45 @@ class Store {
     return list.sort((a, b) => b.created_at.localeCompare(a.created_at));
   }
 
+  // Tables
+
+  async listTables() {
+    return this.data.tables.filter((t) => t.active !== false).sort((a, b) => a.sort - b.sort);
+  }
+
   // Bookings
 
   async createBooking(fields) {
     const booking = {
-      id: this.nextId('booking', 'BKG'),
+      id: null,
       status: 'confirmed',
+      table_id: null,
       created_at: new Date().toISOString(),
       ...fields,
     };
+    this.assertTableFree(booking);
+    booking.id = this.nextId('booking', 'BKG');
     this.data.bookings.push(booking);
     this.save();
     return booking;
+  }
+
+  // Same rule as the database trigger: one active booking per table per sitting.
+  assertTableFree(booking) {
+    if (!booking.table_id || !ACTIVE.includes(booking.status)) return;
+    const clash = this.data.bookings.some(
+      (b) =>
+        b.id !== booking.id &&
+        b.table_id === booking.table_id &&
+        b.booking_date === booking.booking_date &&
+        ACTIVE.includes(b.status) &&
+        overlaps(b.booking_time, booking.booking_time, this.bookingDurationMin)
+    );
+    if (clash) throw tableTaken();
+  }
+
+  async findBooking(id) {
+    return this.data.bookings.find((b) => b.id === id);
   }
 
   async findBookingByCall(callId) {
@@ -97,7 +126,8 @@ class Store {
   async updateBooking(id, patch) {
     const booking = this.data.bookings.find((b) => b.id === id);
     if (!booking) return null;
-    Object.assign(booking, patch);
+    this.assertTableFree({ ...booking, ...patch });
+    Object.assign(booking, patch, { updated_at: new Date().toISOString() });
     this.save();
     return booking;
   }
@@ -157,4 +187,11 @@ function matchesQuery(order, q) {
   );
 }
 
-module.exports = { Store, localDate, matchesQuery };
+function tableTaken() {
+  const err = new Error('That table is already booked for this time.');
+  err.status = 409;
+  err.code = 'table_taken';
+  return err;
+}
+
+module.exports = { Store, localDate, matchesQuery, tableTaken };

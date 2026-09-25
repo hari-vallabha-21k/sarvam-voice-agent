@@ -32,7 +32,6 @@ function loadConfig(env = process.env) {
     },
     restaurantName: env.RESTAURANT_NAME || 'SpiceGarden',
     timeZone: env.TIME_ZONE || 'Asia/Kolkata',
-    seatCapacity: parseInt(env.SEAT_CAPACITY || '40', 10),
     bookingDurationMin: parseInt(env.BOOKING_DURATION_MIN || '90', 10),
     openingHours: parseHours(env.OPENING_HOURS || '12:00-15:30,19:00-23:00'),
     rejectUnknownItems: env.REJECT_UNKNOWN_ITEMS === 'true',

@@ -26,10 +26,18 @@
 
   <main>
     <section class="kpis" aria-label="Order summary">
-      <article class="kpi">
-        <p class="kpi-label">Total orders</p>
-        <p class="kpi-value" id="kpi-total">–</p>
-        <p class="kpi-foot"><span id="kpi-today">–</span> today</p>
+      <article class="kpi kpi-orders">
+        <div class="kpi-label kpi-label-row">
+          <label for="day">Orders on</label>
+          <input type="date" id="day" class="date-input" />
+        </div>
+        <p class="kpi-value" id="kpi-orders">–</p>
+        <p class="kpi-foot"><span id="kpi-all-time">–</span> all time · <button type="button" class="link-btn" id="day-today">Today</button></p>
+      </article>
+      <article class="kpi kpi-new">
+        <p class="kpi-label"><span class="status-icon" aria-hidden="true">●</span>New</p>
+        <p class="kpi-value" id="kpi-new">–</p>
+        <p class="kpi-foot">Waiting to start</p>
       </article>
       <article class="kpi kpi-cooking">
         <p class="kpi-label"><span class="status-icon" aria-hidden="true">🔥</span>Cooking</p>
@@ -41,26 +49,29 @@
         <p class="kpi-value" id="kpi-completed">–</p>
         <p class="kpi-foot"><span id="kpi-cancelled">0</span> cancelled</p>
       </article>
-      <article class="kpi">
-        <p class="kpi-label">Upcoming bookings</p>
-        <p class="kpi-value" id="kpi-bookings">–</p>
-        <p class="kpi-foot"><span id="kpi-bookings-today">0</span> today · <span id="kpi-calls">0</span> calls</p>
-      </article>
     </section>
 
     <section class="panel" aria-labelledby="orders-title">
       <div class="panel-head">
-        <h2 id="orders-title">Order details</h2>
+        <h2 id="orders-title">Order details <span class="muted-title" id="orders-day"></span></h2>
         <div class="controls">
           <div class="tabs" role="tablist" aria-label="Filter by status">
             <button role="tab" class="tab" data-status="" aria-selected="true">All</button>
+            <button role="tab" class="tab" data-status="new" aria-selected="false">New</button>
             <button role="tab" class="tab" data-status="cooking" aria-selected="false">Cooking</button>
             <button role="tab" class="tab" data-status="completed" aria-selected="false">Completed</button>
             <button role="tab" class="tab" data-status="cancelled" aria-selected="false">Cancelled</button>
           </div>
           <input type="search" id="search" placeholder="Search order, customer or dish" aria-label="Search orders" />
+          <button type="button" class="btn" id="export-toggle" aria-expanded="false" aria-controls="export-form">Download CSV</button>
         </div>
       </div>
+      <form class="export-bar" id="export-form" hidden>
+        <label>From <input type="date" id="export-from" class="date-input" required /></label>
+        <label>To <input type="date" id="export-to" class="date-input" required /></label>
+        <button type="submit" class="btn primary" id="export-submit">Download</button>
+        <span class="export-msg" id="export-msg" role="status"></span>
+      </form>
       <div class="table-wrap">
         <table class="orders">
           <thead>
@@ -78,7 +89,7 @@
           </thead>
           <tbody id="orders-body"></tbody>
         </table>
-        <p class="empty" id="orders-empty" hidden>No orders yet. They appear here as soon as a Sarvam call ends.</p>
+        <p class="empty" id="orders-empty" hidden>No orders yet.</p>
       </div>
     </section>
 

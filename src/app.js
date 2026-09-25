@@ -11,8 +11,21 @@ const { localDate } = require('./store');
 
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const STATIC_TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
-const ORDER_STATUSES = ['cooking', 'completed', 'cancelled'];
+// Orders move new -> cooking -> completed; cancelled can happen from new or cooking.
+const ORDER_STATUSES = ['new', 'cooking', 'completed', 'cancelled'];
+const OPEN_STATUSES = ['new', 'cooking'];
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const MAX_EXPORT_DAYS = 366;
 const NEGATIVE_DISPOSITIONS = ['order_cancelled', 'no_order', 'cancelled'];
+
+// A non-JSON reply, such as the CSV export.
+class RawResponse {
+  constructor(status, headers, body) {
+    this.status = status;
+    this.headers = headers;
+    this.body = body;
+  }
+}
 
 class HttpError extends Error {
   constructor(status, message) {
@@ -38,6 +51,7 @@ function createApp({ store, config }) {
     // Dashboard API
     ['GET', '/api/stats', getStats],
     ['GET', '/api/orders', listOrders],
+    ['GET', '/api/orders/export', exportOrders],
     ['GET', '/api/orders/:id', getOrder],
     ['PATCH', '/api/orders/:id', patchOrder],
     ['GET', '/api/bookings', listBookings],
@@ -73,7 +87,7 @@ function createApp({ store, config }) {
       for (const k of ['customer_name', 'customer_phone', 'delivery_address', 'call_summary']) {
         if (!order[k] && call[k]) patch[k] = call[k];
       }
-      if (NEGATIVE_DISPOSITIONS.includes(disposition) && order.status === 'cooking') patch.status = 'cancelled';
+      if (NEGATIVE_DISPOSITIONS.includes(disposition) && OPEN_STATUSES.includes(order.status)) patch.status = 'cancelled';
       if (Object.keys(patch).length) order = await store.updateOrder(order.id, patch);
       result.order = order;
     } else if (call.order_items.length && !NEGATIVE_DISPOSITIONS.includes(disposition)) {
@@ -201,8 +215,9 @@ function createApp({ store, config }) {
     // If the agent calls place_order twice in one call (e.g. after a change), update instead of duplicating.
     const existing = await store.findOrderByCall(call.call_id);
     const fields = orderFields(call, 'sarvam_tool');
+    // A re-placed order keeps its kitchen status, unless it had been cancelled.
     const order = existing
-      ? await store.updateOrder(existing.id, { ...fields, status: 'cooking' })
+      ? await store.updateOrder(existing.id, existing.status === 'cancelled' ? { ...fields, status: 'new' } : fields)
       : await store.createOrder(fields);
     return {
       ...order,
@@ -231,12 +246,57 @@ function createApp({ store, config }) {
 
   // ---------- Dashboard ----------
 
-  function getStats() {
-    return store.stats({ today: localDate(new Date(), config.timeZone), timeZone: config.timeZone });
+  // ?date=YYYY-MM-DD picks the day (restaurant time zone); defaults to today.
+  function getStats(req, { query }) {
+    return store.stats({ date: dateParam(query, 'date') || today(), timeZone: config.timeZone });
   }
 
+  // ?date=YYYY-MM-DD limits the list to one day; without it every order is returned.
   async function listOrders(req, { query }) {
-    return { orders: await store.listOrders({ status: query.get('status') || undefined, q: query.get('q') || undefined }) };
+    const date = dateParam(query, 'date');
+    const range = date ? dayRange(date, date) : {};
+    return {
+      orders: await store.listOrders({ status: query.get('status') || undefined, q: query.get('q') || undefined, ...range }),
+    };
+  }
+
+  // CSV of every order placed between ?from= and ?to= (inclusive, YYYY-MM-DD).
+  async function exportOrders(req, { query }) {
+    const from = dateParam(query, 'from');
+    const to = dateParam(query, 'to');
+    if (!from || !to) throw new HttpError(400, 'from and to are required (YYYY-MM-DD)');
+    if (from > to) throw new HttpError(400, 'The start date must be on or before the end date');
+    const range = dayRange(from, to);
+    if ((range.to - range.from) / 864e5 > MAX_EXPORT_DAYS + 1) {
+      throw new HttpError(400, `Export at most ${MAX_EXPORT_DAYS} days at a time`);
+    }
+    const orders = (await store.listOrders(range)).reverse(); // oldest first
+    const csv = '\uFEFF' + ordersToCsv(orders, config.timeZone); // BOM so Excel reads UTF-8 names correctly
+    return new RawResponse(
+      200,
+      {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="orders_${from}_to_${to}.csv"`,
+      },
+      csv
+    );
+  }
+
+  function today() {
+    return localDate(new Date(), config.timeZone);
+  }
+
+  function dateParam(query, name) {
+    const v = query.get(name);
+    if (!v) return null;
+    if (!DATE_RE.test(v) || Number.isNaN(Date.parse(v))) throw new HttpError(400, `${name} must be YYYY-MM-DD`);
+    return v;
+  }
+
+  // Start of `from` to the start of the day after `to`, in the restaurant's time zone.
+  function dayRange(from, to) {
+    const next = new Date(Date.parse(to) + 864e5).toISOString().slice(0, 10);
+    return { from: zonedMidnight(from, config.timeZone), to: zonedMidnight(next, config.timeZone) };
   }
 
   async function getOrder(req, { params }) {
@@ -353,6 +413,10 @@ function createApp({ store, config }) {
       const params = Object.fromEntries(match.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])]));
       const body = req.method === 'GET' ? Object.fromEntries(url.searchParams) : await readJson(req);
       const result = await match.handler(req, { params, query: url.searchParams, body });
+      if (result instanceof RawResponse) {
+        res.writeHead(result.status, result.headers);
+        return res.end(result.body);
+      }
       send(res, 200, result);
     } catch (err) {
       const status = err.status || 500;
@@ -446,6 +510,54 @@ function normalizeDate(v) {
   if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
   const d = new Date(s);
   return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
+}
+
+// Midnight of YYYY-MM-DD in `timeZone`, as a Date.
+function zonedMidnight(date, timeZone) {
+  const guess = Date.parse(`${date}T00:00:00Z`);
+  let t = guess - tzOffset(guess, timeZone);
+  const corrected = tzOffset(t, timeZone); // differs only when a DST change falls between
+  if (corrected !== tzOffset(guess, timeZone)) t = guess - corrected;
+  return new Date(t);
+}
+
+// How far `timeZone` is ahead of UTC at instant t, in ms.
+function tzOffset(t, timeZone) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(new Date(t));
+  const p = Object.fromEntries(parts.map((x) => [x.type, x.value]));
+  return Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second) - Math.floor(t / 1000) * 1000;
+}
+
+const CSV_COLUMNS = [
+  ['Order ID', (o) => o.id],
+  ['Date', (o, tz) => localDate(new Date(o.created_at), tz)],
+  ['Time', (o, tz) => new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', minute: '2-digit' }).format(new Date(o.created_at))],
+  ['Customer', (o) => o.customer_name],
+  ['Phone', (o) => o.customer_phone],
+  ['Order type', (o) => o.order_type],
+  ['Items', (o) => o.items.map((i) => `${i.quantity} x ${i.name}`).join('; ')],
+  ['Item count', (o) => o.items.reduce((n, i) => n + i.quantity, 0)],
+  ['Subtotal', (o) => o.subtotal],
+  ['GST', (o) => o.tax],
+  ['Total', (o) => o.total],
+  ['Status', (o) => o.status],
+  ['Delivery address', (o) => o.delivery_address],
+  ['Notes', (o) => o.notes],
+];
+
+function ordersToCsv(orders, timeZone) {
+  const rows = [CSV_COLUMNS.map(([h]) => h), ...orders.map((o) => CSV_COLUMNS.map(([, get]) => get(o, timeZone)))];
+  return rows.map((r) => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
+}
+
+function csvCell(v) {
+  if (v === null || v === undefined) return '';
+  let s = String(v);
+  // Stop spreadsheet apps from running caller-supplied text as a formula; phone numbers stay as they are.
+  if (/^[=+\-@\t\r]/.test(s) && !/^\+?[\d\s-]+$/.test(s)) s = `'${s}`;
+  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
 module.exports = { createApp, normalizeTime, normalizeDate };

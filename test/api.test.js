@@ -74,7 +74,7 @@ test('post-call webhook creates an order and a booking; stats reflect it', async
   });
   assert.equal(res.status, 200);
   assert.equal(res.body.order.id, 'ORD-1001');
-  assert.equal(res.body.order.status, 'cooking');
+  assert.equal(res.body.order.status, 'new');
   assert.equal(res.body.order.order_type, 'dine-in');
   assert.equal(res.body.order.total, 567); // 540 + 5% GST
   assert.equal(res.body.booking.booking_time, '20:00');
@@ -83,13 +83,19 @@ test('post-call webhook creates an order and a booking; stats reflect it', async
   const again = await call('POST', '/api/sarvam/webhook', { call_id: 'c1', order_items: '3 Veg Biryani' });
   assert.equal(again.body.order.id, 'ORD-1001');
 
+  await call('PATCH', '/api/orders/ORD-1001', { status: 'cooking' });
   await call('PATCH', '/api/orders/ORD-1001', { status: 'completed' });
   await call('POST', '/api/sarvam/webhook', { call_id: 'c2', customer_name: 'Asha', order_items: '1 Raita' });
+  const second = await call('POST', '/api/sarvam/webhook', { call_id: 'c3', order_items: '1 Naan' });
+  assert.equal(second.body.order.id, 'ORD-1003'); // every order gets the next number
+  await call('PATCH', '/api/orders/ORD-1003', { status: 'cooking' });
 
   const stats = await call('GET', '/api/stats');
-  assert.equal(stats.body.total_orders, 2);
-  assert.equal(stats.body.completed, 1);
+  assert.equal(stats.body.orders, 3);
+  assert.equal(stats.body.new, 1);
   assert.equal(stats.body.cooking, 1);
+  assert.equal(stats.body.completed, 1);
+  assert.equal(stats.body.all_time_orders, 3);
 });
 
 test('webhook skips order creation when the caller cancelled', async (t) => {
@@ -172,7 +178,7 @@ test('SupabaseStore sends the app secret and maps rows', async (t) => {
   const store = new SupabaseStore({ url: 'https://x.supabase.co/', key: 'pk', appSecret: 'sec' });
   const order = await store.createOrder({ call_id: 'c 1', items: [] });
   assert.equal(order.id, 'ORD-1001');
-  assert.equal(order.status, 'cooking');
+  assert.equal(order.status, 'new');
   assert.equal(await store.findOrderByCall('c 1'), undefined);
   await store.logSms({ to: '+91', text: 'hi' });
 
@@ -208,4 +214,65 @@ test('DASHBOARD_USERS adds named logins alongside DASHBOARD_PASSWORD', async (t)
   assert.equal((await call('GET', '/api/stats', undefined, basic('anyone', 'pw'))).status, 200);
   assert.equal((await call('GET', '/api/stats', undefined, basic('test', 'm9'))).status, 401);
   assert.equal((await call('GET', '/api/stats', undefined, basic('other', 't3st'))).status, 401);
+});
+
+test('stats and order list follow ?date, and bad dates are rejected', async (t) => {
+  const { server, call, store } = await startServer();
+  t.after(() => server.close());
+  await call('POST', '/api/tools/place_order', { customer_name: 'Today', order_items: '1 Raita' });
+  const old = await call('POST', '/api/tools/place_order', { customer_name: 'Last week', order_items: '2 Raita' });
+  // Backdate one order to 20 Sep, 11:30 pm IST, which is still 20 Sep in the restaurant's time zone.
+  store.data.orders.find((o) => o.id === old.body.order_id).created_at = '2026-09-20T18:00:00.000Z';
+
+  const day = await call('GET', '/api/stats?date=2026-09-20');
+  assert.equal(day.body.orders, 1);
+  assert.equal(day.body.new, 1);
+  assert.equal(day.body.all_time_orders, 2);
+  const list = await call('GET', '/api/orders?date=2026-09-20');
+  assert.deepEqual(list.body.orders.map((o) => o.customer_name), ['Last week']);
+  assert.equal((await call('GET', '/api/orders?date=2026-09-21')).body.orders.length, 0);
+  assert.equal((await call('GET', '/api/orders')).body.orders.length, 2);
+  assert.equal((await call('GET', '/api/stats?date=20-09-2026')).status, 400);
+});
+
+test('CSV export covers the date range, oldest first, with safe cells', async (t) => {
+  const { server, store } = await startServer();
+  t.after(() => server.close());
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const place = (body) =>
+    fetch(`${base}/api/tools/place_order`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json());
+  const a = await place({ customer_name: '=HYPERLINK("x")', customer_phone: '+919800000000', order_items: '2 x Veg Biryani, 1 Raita' });
+  const b = await place({ customer_name: 'Asha, R', order_items: '1 Mango Lassi' });
+  const c = await place({ customer_name: 'Outside range', order_items: '1 Raita' });
+  const setDate = (id, iso) => (store.data.orders.find((o) => o.id === id).created_at = iso);
+  setDate(a.order_id, '2026-09-21T06:00:00.000Z');
+  setDate(b.order_id, '2026-09-20T06:00:00.000Z');
+  setDate(c.order_id, '2026-09-23T06:00:00.000Z');
+
+  const res = await fetch(`${base}/api/orders/export?from=2026-09-20&to=2026-09-22`);
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-type'), /text\/csv/);
+  assert.match(res.headers.get('content-disposition'), /orders_2026-09-20_to_2026-09-22\.csv/);
+  const lines = (await res.text()).replace(/^\uFEFF/, '').trim().split('\r\n');
+  assert.equal(lines.length, 3);
+  assert.match(lines[0], /^Order ID,Date,Time,Customer,Phone/);
+  assert.match(lines[1], /^ORD-1002,2026-09-20,11:30,"Asha, R",/);
+  assert.match(lines[2], /^ORD-1001,2026-09-21,11:30,"'=HYPERLINK\(""x""\)",\+919800000000,/);
+  assert.match(lines[2], /2 x Veg Biryani; 1 x Raita,3,420,21,441,new/);
+
+  assert.equal((await fetch(`${base}/api/orders/export?from=2026-09-22&to=2026-09-20`)).status, 400);
+  assert.equal((await fetch(`${base}/api/orders/export?from=2026-09-20`)).status, 400);
+});
+
+test('orders move new -> cooking -> completed and a re-placed order keeps its status', async (t) => {
+  const { server, call } = await startServer();
+  t.after(() => server.close());
+  const placed = await call('POST', '/api/tools/place_order', { call_id: 'k1', order_items: '1 Raita' });
+  assert.equal(placed.body.status, 'new');
+  assert.equal((await call('PATCH', `/api/orders/${placed.body.id}`, { status: 'cooking' })).body.status, 'cooking');
+  const again = await call('POST', '/api/tools/place_order', { call_id: 'k1', order_items: '2 Raita' });
+  assert.equal(again.body.status, 'cooking');
+  const done = await call('PATCH', `/api/orders/${placed.body.id}`, { status: 'completed' });
+  assert.equal(done.body.status, 'completed');
+  assert.ok(done.body.completed_at);
 });

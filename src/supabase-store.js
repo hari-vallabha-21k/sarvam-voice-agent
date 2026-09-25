@@ -10,7 +10,7 @@
 
 const { matchesQuery } = require('./store');
 
-const LIST_LIMIT = 500;
+const PAGE_SIZE = 1000; // PostgREST's default max rows per request
 
 class SupabaseStore {
   constructor({ url, key, appSecret }) {
@@ -61,8 +61,9 @@ class SupabaseStore {
 
   // Orders
 
+  // The id (ORD-1001, ORD-1002, ...) is assigned by a trigger from a gap-free counter.
   async createOrder(fields) {
-    return this.insert('orders', { status: 'cooking', completed_at: null, ...fields });
+    return this.insert('orders', { status: 'new', completed_at: null, ...fields });
   }
 
   async findOrder(id) {
@@ -78,10 +79,19 @@ class SupabaseStore {
     return this.update('orders', id, { ...patch, updated_at: new Date().toISOString() });
   }
 
-  async listOrders({ status, q } = {}) {
-    let path = `/orders?order=created_at.desc&limit=${LIST_LIMIT}`;
-    if (status) path += `&status=eq.${enc(status)}`;
-    const list = await this.request('GET', path);
+  // from / to are Date bounds on created_at (to is exclusive). Pages through
+  // every match, so a long CSV export is not cut off at PostgREST's row cap.
+  async listOrders({ status, q, from, to } = {}) {
+    let filter = 'order=created_at.desc,id.desc';
+    if (status) filter += `&status=eq.${enc(status)}`;
+    if (from) filter += `&created_at=gte.${enc(from.toISOString())}`;
+    if (to) filter += `&created_at=lt.${enc(to.toISOString())}`;
+    const list = [];
+    for (let offset = 0; ; offset += PAGE_SIZE) {
+      const page = await this.request('GET', `/orders?${filter}&limit=${PAGE_SIZE}&offset=${offset}`);
+      list.push(...page);
+      if (page.length < PAGE_SIZE) break;
+    }
     return q ? list.filter((o) => matchesQuery(o, q)) : list;
   }
 
@@ -101,7 +111,7 @@ class SupabaseStore {
   }
 
   async listBookings({ date } = {}) {
-    let path = `/bookings?order=booking_date.asc,booking_time.asc&limit=${LIST_LIMIT}`;
+    let path = `/bookings?order=booking_date.asc,booking_time.asc&limit=${PAGE_SIZE}`;
     if (date) path += `&booking_date=eq.${enc(date)}`;
     return this.request('GET', path);
   }
@@ -123,8 +133,8 @@ class SupabaseStore {
     await this.request('POST', '/sms', { body: { to_phone: to, ...rest } });
   }
 
-  async stats({ today, timeZone }) {
-    return this.request('POST', '/rpc/dashboard_stats', { body: { p_today: today, p_tz: timeZone } });
+  async stats({ date, timeZone }) {
+    return this.request('POST', '/rpc/order_stats', { body: { p_date: date, p_tz: timeZone } });
   }
 }
 

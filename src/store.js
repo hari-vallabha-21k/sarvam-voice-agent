@@ -37,7 +37,7 @@ class Store {
     const now = new Date().toISOString();
     const order = {
       id: this.nextId('order', 'ORD'),
-      status: 'cooking',
+      status: 'new',
       created_at: now,
       updated_at: now,
       completed_at: null,
@@ -65,9 +65,12 @@ class Store {
     return order;
   }
 
-  async listOrders({ status, q } = {}) {
+  // from / to are Date bounds on created_at (to is exclusive).
+  async listOrders({ status, q, from, to } = {}) {
     let list = [...this.data.orders];
     if (status) list = list.filter((o) => o.status === status);
+    if (from) list = list.filter((o) => new Date(o.created_at) >= from);
+    if (to) list = list.filter((o) => new Date(o.created_at) < to);
     if (q) list = list.filter((o) => matchesQuery(o, q));
     return list.sort((a, b) => b.created_at.localeCompare(a.created_at));
   }
@@ -122,20 +125,19 @@ class Store {
     this.save();
   }
 
-  // Dashboard KPIs. `today` is YYYY-MM-DD in the restaurant's time zone.
-  async stats({ today, timeZone }) {
-    const { orders, bookings, calls } = this.data;
-    const count = (s) => orders.filter((o) => o.status === s).length;
+  // Dashboard KPIs for one day. `date` is YYYY-MM-DD in the restaurant's time zone.
+  async stats({ date, timeZone }) {
+    const all = this.data.orders;
+    const day = all.filter((o) => localDate(new Date(o.created_at), timeZone) === date);
+    const count = (s) => day.filter((o) => o.status === s).length;
     return {
-      total_orders: orders.length,
+      date,
+      orders: day.length,
+      new: count('new'),
       cooking: count('cooking'),
       completed: count('completed'),
       cancelled: count('cancelled'),
-      orders_today: orders.filter((o) => localDate(new Date(o.created_at), timeZone) === today).length,
-      bookings_today: bookings.filter((b) => b.booking_date === today && b.status !== 'cancelled').length,
-      upcoming_bookings: bookings.filter((b) => b.booking_date >= today && ['confirmed', 'seated'].includes(b.status)).length,
-      total_bookings: bookings.length,
-      calls_received: calls.length,
+      all_time_orders: all.length,
     };
   }
 }

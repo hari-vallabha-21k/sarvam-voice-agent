@@ -4,9 +4,12 @@ Customers call the Sarvam voice agent to order food or book a table. When each
 call ends, Sarvam posts the captured details to this server, and the kitchen
 dashboard updates live.
 
-- **Dashboard** (`/`): totals for **Total orders**, **Cooking** and **Completed**,
-  plus an order table with **Order ID, Customer name, Dish and Quantity**, type,
-  total and status. Staff mark orders completed or cancelled with one click.
+- **Dashboard** (`/`): cards for **Orders**, **New**, **Cooking** and **Completed**
+  for the day picked in the Orders card (today by default), plus that day's order
+  table with **Order ID, Customer name, Dish and Quantity**, type, total and status.
+  Orders arrive as **New**; staff click **Start cooking**, then **Mark completed**,
+  and the cards update at once. **Download CSV** exports every order between two dates.
+  Order IDs run in sequence with no gaps (ORD-1001, ORD-1002, ...).
   Table bookings are listed below. Works on phones, supports light and dark mode,
   and refreshes every 5 seconds.
 - **Sarvam-compatible API**: a post-call webhook plus the five agent tools
@@ -45,9 +48,10 @@ Endpoints under `/api/sarvam` and `/api/tools` require
 | POST | `/api/tools/create_booking` | Creates a table booking |
 | POST | `/api/tools/place_order` | Sends an order to the kitchen (status `cooking`) |
 | POST | `/api/tools/send_confirmation_sms` | Texts the order or booking summary (Twilio, or logged when unset) |
-| GET | `/api/stats` | `total_orders`, `cooking`, `completed`, `cancelled`, bookings |
-| GET | `/api/orders?status=&q=` | Order list, newest first |
-| PATCH | `/api/orders/:id` | `{ "status": "cooking" \| "completed" \| "cancelled" }` |
+| GET | `/api/stats?date=YYYY-MM-DD` | For that day (default today): `orders`, `new`, `cooking`, `completed`, `cancelled`, plus `all_time_orders` |
+| GET | `/api/orders?date=&status=&q=` | Order list, newest first. `date` limits it to one day |
+| GET | `/api/orders/export?from=&to=` | CSV of orders placed between two dates (inclusive, max 366 days) |
+| PATCH | `/api/orders/:id` | `{ "status": "new" \| "cooking" \| "completed" \| "cancelled" }` |
 | GET | `/api/bookings` | Table bookings |
 | PATCH | `/api/bookings/:id` | `{ "status": "confirmed" \| "seated" \| "cancelled" \| "no_show" }` |
 | GET | `/api/calls` | Recent post-call webhook log |

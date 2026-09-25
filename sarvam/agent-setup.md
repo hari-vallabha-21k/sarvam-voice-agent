@@ -5,6 +5,10 @@ This backend works with the Sarvam agent **SpiceGarden Order Assistant**
 mid-call tools, and the post-call webhook. Every step can be done from the
 Sarvam MCP (`configure_agent`, `create_api_tool`) or from the Sarvam dashboard.
 
+Production runs at `https://sarvam-voice-agent-teal.vercel.app` and the agent
+is already connected to it (`place_order` tool plus the `send_call_to_dashboard`
+on-end webhook). The steps below are the reference for rebuilding it.
+
 Replace `https://YOUR-HOST` with the public HTTPS URL where this server runs,
 and `YOUR_SECRET` with the value of `WEBHOOK_SECRET`.
 
@@ -105,8 +109,12 @@ Then reference them from the prompt, for example in the order summary phase:
 `After the user confirms the order, call tool:place_order , then call tool:send_confirmation_sms .`
 
 When the agent both calls `place_order` mid-call and fires the post-call
-webhook, pass the same `call_id` to both. The order is then updated, not
-duplicated. Without a shared id, use one or the other.
+webhook, link them so the order is updated, not duplicated. The live agent
+does this with an `order_id` agent variable: `place_order` saves the
+response's `order_id` into it (`save_to_variables`), and the on-end webhook
+sends `"order_id": "{{order_id}}"`. The webhook then fills in the summary on
+that order, or cancels it when the disposition is `order_cancelled`. A shared
+`call_id` works the same way.
 
 ## 4. Commit and deploy
 

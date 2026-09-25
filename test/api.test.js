@@ -198,3 +198,14 @@ test('webhook matches the order place_order created via order_id and cancels it'
   assert.equal(hook.body.order.call_summary, 'Ordered raita, then cancelled');
   assert.equal((await call('GET', '/api/orders')).body.orders.length, 1);
 });
+
+test('DASHBOARD_USERS adds named logins alongside DASHBOARD_PASSWORD', async (t) => {
+  const { server, call } = await startServer({ DASHBOARD_PASSWORD: 'pw', DASHBOARD_USERS: 'test:t3st, manager:m9' });
+  t.after(() => server.close());
+  const basic = (user, pw) => ({ Authorization: 'Basic ' + Buffer.from(`${user}:${pw}`).toString('base64') });
+  assert.equal((await call('GET', '/api/stats', undefined, basic('test', 't3st'))).status, 200);
+  assert.equal((await call('GET', '/api/stats', undefined, basic('manager', 'm9'))).status, 200);
+  assert.equal((await call('GET', '/api/stats', undefined, basic('anyone', 'pw'))).status, 200);
+  assert.equal((await call('GET', '/api/stats', undefined, basic('test', 'm9'))).status, 401);
+  assert.equal((await call('GET', '/api/stats', undefined, basic('other', 't3st'))).status, 401);
+});

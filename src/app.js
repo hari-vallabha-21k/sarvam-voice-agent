@@ -315,13 +315,17 @@ function createApp({ store, config }) {
     return pathname.startsWith('/api/sarvam/') || pathname.startsWith('/api/tools/') || pathname === '/api/health';
   }
 
-  // HTTP Basic auth with any username and DASHBOARD_PASSWORD. Off when the password is unset.
+  // HTTP Basic auth: any username with DASHBOARD_PASSWORD, or a named login from
+  // DASHBOARD_USERS. Off when neither is set.
   function dashboardAuthorized(req) {
-    if (!config.dashboardPassword) return true;
+    if (!config.dashboardPassword && !config.dashboardUsers.size) return true;
     const m = (req.headers.authorization || '').match(/^Basic\s+(.+)$/i);
     if (!m) return false;
     const decoded = Buffer.from(m[1], 'base64').toString('utf8');
-    return safeEqual(decoded.slice(decoded.indexOf(':') + 1), config.dashboardPassword);
+    const user = decoded.slice(0, decoded.indexOf(':'));
+    const password = decoded.slice(decoded.indexOf(':') + 1);
+    if (config.dashboardPassword && safeEqual(password, config.dashboardPassword)) return true;
+    return config.dashboardUsers.has(user) && safeEqual(password, config.dashboardUsers.get(user));
   }
 
   // ---------- HTTP plumbing ----------

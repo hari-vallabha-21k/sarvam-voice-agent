@@ -7,12 +7,24 @@ function parseHours(s) {
   return s.split(',').map((range) => range.trim().split('-').map((t) => t.trim()));
 }
 
+// "test:pass1,manager:pass2" -> Map { test => pass1, manager => pass2 }
+function parseUsers(s) {
+  return new Map(
+    s
+      .split(',')
+      .map((pair) => pair.trim())
+      .filter((pair) => pair.includes(':'))
+      .map((pair) => [pair.slice(0, pair.indexOf(':')).trim(), pair.slice(pair.indexOf(':') + 1).trim()])
+  );
+}
+
 function loadConfig(env = process.env) {
   return {
     port: parseInt(env.PORT || '3000', 10),
     dataFile: env.DATA_FILE || path.join(__dirname, '..', 'data', 'db.json'),
     webhookSecret: env.WEBHOOK_SECRET || '',
     dashboardPassword: env.DASHBOARD_PASSWORD || '',
+    dashboardUsers: parseUsers(env.DASHBOARD_USERS || ''),
     supabase: {
       url: env.SUPABASE_URL || '',
       key: env.SUPABASE_KEY || '',

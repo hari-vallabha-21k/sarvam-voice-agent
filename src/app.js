@@ -7,6 +7,7 @@ const crypto = require('node:crypto');
 const { MENU, GST_RATE } = require('./menu');
 const { normalizeCall, parseOrderItems, computeTotals, normalizeOrderType, toPartySize } = require('./sarvam');
 const { sendSms } = require('./sms');
+const { localDate } = require('./store');
 
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const STATIC_TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
@@ -58,12 +59,12 @@ function createApp({ store, config }) {
 
   // ---------- Sarvam post-call webhook ----------
 
-  function postCallWebhook(req, { body }) {
+  async function postCallWebhook(req, { body }) {
     const call = normalizeCall(body);
     const disposition = (call.disposition || '').toLowerCase();
     const result = { ok: true, call_id: call.call_id || null, order: null, booking: null };
 
-    let order = store.findOrderByCall(call.call_id);
+    let order = await store.findOrderByCall(call.call_id);
     if (order) {
       // place_order already ran during the call; fill in anything we learnt later.
       const patch = {};
@@ -71,16 +72,16 @@ function createApp({ store, config }) {
         if (!order[k] && call[k]) patch[k] = call[k];
       }
       if (NEGATIVE_DISPOSITIONS.includes(disposition) && order.status === 'cooking') patch.status = 'cancelled';
-      if (Object.keys(patch).length) order = store.updateOrder(order.id, patch);
+      if (Object.keys(patch).length) order = await store.updateOrder(order.id, patch);
       result.order = order;
     } else if (call.order_items.length && !NEGATIVE_DISPOSITIONS.includes(disposition)) {
-      result.order = store.createOrder(orderFields(call, 'sarvam_call_end'));
+      result.order = await store.createOrder(orderFields(call, 'sarvam_call_end'));
     }
 
     if (call.booking_date && call.booking_time) {
       result.booking =
-        store.findBookingByCall(call.call_id) ||
-        store.createBooking({
+        (await store.findBookingByCall(call.call_id)) ||
+        (await store.createBooking({
           call_id: call.call_id || null,
           customer_name: call.customer_name || null,
           customer_phone: call.customer_phone || null,
@@ -88,10 +89,10 @@ function createApp({ store, config }) {
           booking_time: normalizeTime(call.booking_time) || call.booking_time,
           party_size: call.party_size,
           source: 'sarvam_call_end',
-        });
+        }));
     }
 
-    store.logCall({
+    await store.logCall({
       call_id: call.call_id || null,
       customer_name: call.customer_name || null,
       customer_phone: call.customer_phone || null,
@@ -130,18 +131,19 @@ function createApp({ store, config }) {
     };
   }
 
-  function checkTableAvailability(req, { body }) {
+  async function checkTableAvailability(req, { body }) {
     const date = normalizeDate(body.booking_date || body.date);
     const time = normalizeTime(body.booking_time || body.time);
     const party = toPartySize(body.party_size || body.guests);
     if (!date || !time || !party) {
       throw new HttpError(400, 'booking_date (YYYY-MM-DD), booking_time (HH:MM) and party_size are required');
     }
-    const requested = slotStatus(date, time, party);
+    const bookings = await store.listBookings({ date });
+    const requested = slotStatus(bookings, time, party);
     const alternatives = requested.available
       ? []
       : candidateSlots(time)
-          .filter((t) => slotStatus(date, t, party).available)
+          .filter((t) => slotStatus(bookings, t, party).available)
           .slice(0, 3);
     return {
       available: requested.available,
@@ -159,18 +161,18 @@ function createApp({ store, config }) {
     };
   }
 
-  function createBooking(req, { body }) {
+  async function createBooking(req, { body }) {
     const call = normalizeCall(body);
     const date = normalizeDate(call.booking_date);
     const time = normalizeTime(call.booking_time);
     if (!date || !time || !call.party_size) {
       throw new HttpError(400, 'booking_date, booking_time and party_size are required');
     }
-    const status = slotStatus(date, time, call.party_size);
+    const status = slotStatus(await store.listBookings({ date }), time, call.party_size);
     if (!status.available) {
       throw new HttpError(409, status.reason || 'That slot is fully booked. Please pick another time.');
     }
-    const booking = store.createBooking({
+    const booking = await store.createBooking({
       call_id: call.call_id || null,
       customer_name: call.customer_name || null,
       customer_phone: call.customer_phone || null,
@@ -187,7 +189,7 @@ function createApp({ store, config }) {
     };
   }
 
-  function placeOrder(req, { body }) {
+  async function placeOrder(req, { body }) {
     const call = normalizeCall(body);
     if (!call.order_items.length) throw new HttpError(400, 'order_items is required');
     const unknown = call.order_items.filter((it) => !it.on_menu).map((it) => it.name);
@@ -195,9 +197,11 @@ function createApp({ store, config }) {
       throw new HttpError(422, `Not on the menu: ${unknown.join(', ')}`);
     }
     // If the agent calls place_order twice in one call (e.g. after a change), update instead of duplicating.
-    const existing = store.findOrderByCall(call.call_id);
+    const existing = await store.findOrderByCall(call.call_id);
     const fields = orderFields(call, 'sarvam_tool');
-    const order = existing ? store.updateOrder(existing.id, { ...fields, status: 'cooking' }) : store.createOrder(fields);
+    const order = existing
+      ? await store.updateOrder(existing.id, { ...fields, status: 'cooking' })
+      : await store.createOrder(fields);
     return {
       ...order,
       order_id: order.id,
@@ -211,48 +215,35 @@ function createApp({ store, config }) {
     if (!to) throw new HttpError(400, 'customer_phone is required');
     let text = body.message;
     if (!text) {
-      const order = body.order_id ? store.findOrder(body.order_id) : store.findOrderByCall(call.call_id);
-      const booking = store.findBookingByCall(call.call_id);
+      const order = body.order_id ? await store.findOrder(body.order_id) : await store.findOrderByCall(call.call_id);
+      const booking = await store.findBookingByCall(call.call_id);
       const lines = [`Hi ${call.customer_name || 'there'}, thanks for calling ${config.restaurantName}.`];
       if (order) lines.push(`Order ${order.id}: ${order.items.map((i) => `${i.quantity} x ${i.name}`).join(', ')}. Total Rs ${order.total}.`);
       if (booking) lines.push(`Table booking ${booking.id}: ${booking.party_size} people on ${booking.booking_date} at ${booking.booking_time}.`);
       text = lines.join(' ');
     }
     const result = await sendSms(config, to, text);
-    store.logSms({ to, text, provider: result.provider, status: result.status, call_id: call.call_id || null });
+    await store.logSms({ to, text, provider: result.provider, status: result.status, call_id: call.call_id || null });
     return { ...result, to, message: 'Confirmation SMS sent.' };
   }
 
   // ---------- Dashboard ----------
 
   function getStats() {
-    const today = localDate(new Date(), config.timeZone);
-    const orders = store.data.orders;
-    const count = (s) => orders.filter((o) => o.status === s).length;
-    return {
-      total_orders: orders.length,
-      cooking: count('cooking'),
-      completed: count('completed'),
-      cancelled: count('cancelled'),
-      orders_today: orders.filter((o) => localDate(new Date(o.created_at), config.timeZone) === today).length,
-      bookings_today: store.data.bookings.filter((b) => b.booking_date === today && b.status !== 'cancelled').length,
-      upcoming_bookings: store.data.bookings.filter((b) => b.booking_date >= today && ['confirmed', 'seated'].includes(b.status)).length,
-      total_bookings: store.data.bookings.length,
-      calls_received: store.data.calls.length,
-    };
+    return store.stats({ today: localDate(new Date(), config.timeZone), timeZone: config.timeZone });
   }
 
-  function listOrders(req, { query }) {
-    return { orders: store.listOrders({ status: query.get('status') || undefined, q: query.get('q') || undefined }) };
+  async function listOrders(req, { query }) {
+    return { orders: await store.listOrders({ status: query.get('status') || undefined, q: query.get('q') || undefined }) };
   }
 
-  function getOrder(req, { params }) {
-    const order = store.findOrder(params.id);
+  async function getOrder(req, { params }) {
+    const order = await store.findOrder(params.id);
     if (!order) throw new HttpError(404, 'Order not found');
     return order;
   }
 
-  function patchOrder(req, { params, body }) {
+  async function patchOrder(req, { params, body }) {
     const patch = {};
     if (body.status !== undefined) {
       if (!ORDER_STATUSES.includes(body.status)) throw new HttpError(400, `status must be one of ${ORDER_STATUSES.join(', ')}`);
@@ -265,40 +256,41 @@ function createApp({ store, config }) {
     }
     for (const k of ['customer_name', 'customer_phone', 'notes']) if (body[k] !== undefined) patch[k] = body[k];
     if (body.order_type !== undefined) patch.order_type = normalizeOrderType(body.order_type);
-    const order = store.updateOrder(params.id, patch);
+    const order = await store.updateOrder(params.id, patch);
     if (!order) throw new HttpError(404, 'Order not found');
     return order;
   }
 
-  function listBookings(req, { query }) {
-    return { bookings: store.listBookings({ date: query.get('date') || undefined }) };
+  async function listBookings(req, { query }) {
+    return { bookings: await store.listBookings({ date: query.get('date') || undefined }) };
   }
 
-  function patchBooking(req, { params, body }) {
+  async function patchBooking(req, { params, body }) {
     if (!['confirmed', 'seated', 'cancelled', 'no_show'].includes(body.status)) {
       throw new HttpError(400, 'status must be confirmed, seated, cancelled or no_show');
     }
-    const booking = store.updateBooking(params.id, { status: body.status });
+    const booking = await store.updateBooking(params.id, { status: body.status });
     if (!booking) throw new HttpError(404, 'Booking not found');
     return booking;
   }
 
-  function listCalls(req, { query }) {
+  async function listCalls(req, { query }) {
     const limit = Math.min(parseInt(query.get('limit') || '50', 10) || 50, 500);
-    return { calls: store.data.calls.slice(-limit).reverse().map(({ payload, ...rest }) => rest) };
+    return { calls: await store.recentCalls(limit) };
   }
 
   // ---------- Table capacity ----------
 
-  function slotStatus(date, time, party) {
+  // `bookings` are that day's bookings, fetched once by the caller.
+  function slotStatus(bookings, time, party) {
     const mins = toMinutes(time);
     const open = config.openingHours.some(([from, to]) => mins >= toMinutes(from) && mins + config.bookingDurationMin <= toMinutes(to));
     if (!open) {
       const hours = config.openingHours.map(([a, b]) => `${a} to ${b}`).join(' and ');
       return { available: false, seats_left: 0, reason: `We take bookings between ${hours}.` };
     }
-    const taken = store.data.bookings
-      .filter((b) => b.booking_date === date && b.status !== 'cancelled' && b.status !== 'no_show')
+    const taken = bookings
+      .filter((b) => b.status !== 'cancelled' && b.status !== 'no_show')
       .filter((b) => Math.abs(toMinutes(b.booking_time) - mins) < config.bookingDurationMin)
       .reduce((sum, b) => sum + (b.party_size || 0), 0);
     const seatsLeft = Math.max(0, config.seatCapacity - taken);
@@ -314,6 +306,22 @@ function createApp({ store, config }) {
     return out.sort((a, b) => Math.abs(a - base) - Math.abs(b - base)).map(fromMinutes);
   }
 
+  // ---------- Dashboard login ----------
+
+  // Sarvam endpoints use WEBHOOK_SECRET instead, and /api/health stays open for uptime checks.
+  function isPublicPath(pathname) {
+    return pathname.startsWith('/api/sarvam/') || pathname.startsWith('/api/tools/') || pathname === '/api/health';
+  }
+
+  // HTTP Basic auth with any username and DASHBOARD_PASSWORD. Off when the password is unset.
+  function dashboardAuthorized(req) {
+    if (!config.dashboardPassword) return true;
+    const m = (req.headers.authorization || '').match(/^Basic\s+(.+)$/i);
+    if (!m) return false;
+    const decoded = Buffer.from(m[1], 'base64').toString('utf8');
+    return safeEqual(decoded.slice(decoded.indexOf(':') + 1), config.dashboardPassword);
+  }
+
   // ---------- HTTP plumbing ----------
 
   const compiled = routes.map(([method, pattern, handler]) => {
@@ -326,6 +334,10 @@ function createApp({ store, config }) {
     const url = new URL(req.url, 'http://localhost');
     try {
       if (req.method === 'OPTIONS') return send(res, 204, null);
+      if (!isPublicPath(url.pathname) && !dashboardAuthorized(req)) {
+        res.setHeader('WWW-Authenticate', `Basic realm="${config.restaurantName} dashboard", charset="UTF-8"`);
+        return send(res, 401, { ok: false, error: 'Login required' });
+      }
       const match = compiled.find((r) => r.method === req.method && r.re.test(url.pathname));
       if (!match) {
         if (req.method === 'GET' && !url.pathname.startsWith('/api/')) return serveStatic(url.pathname, res);
@@ -428,10 +440,6 @@ function normalizeDate(v) {
   if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
   const d = new Date(s);
   return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
-}
-
-function localDate(d, timeZone) {
-  return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(d);
 }
 
 module.exports = { createApp, normalizeTime, normalizeDate };

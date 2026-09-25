@@ -12,7 +12,8 @@ dashboard updates live.
 - **Sarvam-compatible API**: a post-call webhook plus the five agent tools
   (`get_menu`, `check_table_availability`, `create_booking`, `place_order`,
   `send_confirmation_sms`).
-- No dependencies. Needs only Node.js 18 or newer. Data is stored in `data/db.json`.
+- No dependencies. Needs only Node.js 18 or newer. Data is stored in Supabase
+  when `SUPABASE_URL` is set (production), otherwise in `data/db.json`.
 
 ## Run it
 
@@ -76,7 +77,22 @@ marked "not on menu" on the dashboard.
 
 ## Deploying
 
-Any Node host works (Render, Railway, Fly.io, a VM). Mount a persistent disk
-for `DATA_FILE`, set `WEBHOOK_SECRET`, and give Sarvam the public HTTPS URL.
-The dashboard endpoints have no login. Put the site behind your host's auth,
-or keep it on the restaurant network, if the URL is public.
+Production runs on **Vercel** with **Supabase** for storage.
+
+1. **Supabase**: run `supabase/migrations/*.sql` in the SQL editor, then set the
+   app secret the server will send:
+   `insert into private.app_config (app_secret) values ('<long random string>');`
+   Every table has RLS on, and the only policy requires that secret in the
+   `x-app-secret` header, so the publishable key alone can read or write nothing.
+2. **Vercel**: import the repo. `vercel.json` routes every path to `api/index.js`
+   (region `bom1`, Mumbai). Set these environment variables:
+   `SUPABASE_URL`, `SUPABASE_KEY` (publishable key), `SUPABASE_APP_SECRET`,
+   `WEBHOOK_SECRET`, `DASHBOARD_PASSWORD`, plus any of the optional ones in `.env.example`.
+3. **Sarvam**: point the agent's tools and post-call webhook at the Vercel URL
+   (see `sarvam/agent-setup.md`).
+
+The dashboard asks for a login (any username, `DASHBOARD_PASSWORD`) when that
+variable is set. `/api/sarvam/*` and `/api/tools/*` use `WEBHOOK_SECRET` instead,
+and `/api/health` is open.
+
+Any other Node host also works: run `npm start` with the same environment variables.

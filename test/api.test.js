@@ -146,3 +146,39 @@ test('WEBHOOK_SECRET is enforced on Sarvam endpoints only', async (t) => {
   assert.equal((await call('POST', '/api/tools/place_order', { order_items: '1 Raita' }, { 'X-API-Key': 's3cret' })).status, 200);
   assert.equal((await call('GET', '/api/stats')).status, 200);
 });
+
+test('DASHBOARD_PASSWORD guards the dashboard but not the Sarvam endpoints', async (t) => {
+  const { server, call } = await startServer({ DASHBOARD_PASSWORD: 'pw', WEBHOOK_SECRET: 's3cret' });
+  t.after(() => server.close());
+  const basic = (pw) => ({ Authorization: 'Basic ' + Buffer.from(`staff:${pw}`).toString('base64') });
+  assert.equal((await call('GET', '/api/stats')).status, 401);
+  assert.equal((await call('GET', '/api/stats', undefined, basic('nope'))).status, 401);
+  assert.equal((await call('GET', '/api/stats', undefined, basic('pw'))).status, 200);
+  assert.equal((await call('GET', '/api/health')).status, 200);
+  assert.equal((await call('POST', '/api/tools/place_order', { order_items: '1 Raita' }, { Authorization: 'Bearer s3cret' })).status, 200);
+});
+
+test('SupabaseStore sends the app secret and maps rows', async (t) => {
+  const { SupabaseStore } = require('../src/supabase-store');
+  const realFetch = global.fetch;
+  const seen = [];
+  global.fetch = async (url, opts) => {
+    seen.push({ url, opts });
+    const rows = opts.method === 'POST' ? [{ id: 'ORD-1001', ...JSON.parse(opts.body) }] : [];
+    return new Response(JSON.stringify(rows), { status: opts.method === 'POST' ? 201 : 200 });
+  };
+  t.after(() => (global.fetch = realFetch));
+
+  const store = new SupabaseStore({ url: 'https://x.supabase.co/', key: 'pk', appSecret: 'sec' });
+  const order = await store.createOrder({ call_id: 'c 1', items: [] });
+  assert.equal(order.id, 'ORD-1001');
+  assert.equal(order.status, 'cooking');
+  assert.equal(await store.findOrderByCall('c 1'), undefined);
+  await store.logSms({ to: '+91', text: 'hi' });
+
+  assert.equal(seen[0].url, 'https://x.supabase.co/rest/v1/orders');
+  assert.equal(seen[0].opts.headers['x-app-secret'], 'sec');
+  assert.equal(seen[0].opts.headers.Prefer, 'return=representation');
+  assert.match(seen[1].url, /call_id=eq\.c%201/);
+  assert.equal(JSON.parse(seen[2].opts.body).to_phone, '+91');
+});

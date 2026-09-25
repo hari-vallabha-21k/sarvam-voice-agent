@@ -5,6 +5,9 @@
 const base = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
 const headers = { 'Content-Type': 'application/json' };
 if (process.env.WEBHOOK_SECRET) headers.Authorization = `Bearer ${process.env.WEBHOOK_SECRET}`;
+// Dashboard endpoints (order list, status change) use the dashboard login instead.
+const dashHeaders = { 'Content-Type': 'application/json' };
+if (process.env.DASHBOARD_PASSWORD) dashHeaders.Authorization = 'Basic ' + Buffer.from(`seed:${process.env.DASHBOARD_PASSWORD}`).toString('base64');
 
 const calls = [
   { call_id: 'demo-1', customer_name: 'Asha Reddy', customer_phone: '+919876500001', order_type: 'takeaway', order_items: '2 x Paneer Butter Masala, 4 Butter Naan, one Mango Lassi', disposition: 'order_placed' },
@@ -21,7 +24,7 @@ const calls = [
     console.log(res.status, body.call_id, data.order ? data.order.id : '-', data.booking ? data.booking.id : '-');
   }
   // Mark the first order completed so all three KPI states show up.
-  const { orders } = await (await fetch(`${base}/api/orders`)).json();
+  const { orders } = await (await fetch(`${base}/api/orders`, { headers: dashHeaders })).json();
   const first = orders.find((o) => o.call_id === 'demo-1');
-  if (first) await fetch(`${base}/api/orders/${first.id}`, { method: 'PATCH', headers, body: JSON.stringify({ status: 'completed' }) });
+  if (first) await fetch(`${base}/api/orders/${first.id}`, { method: 'PATCH', headers: dashHeaders, body: JSON.stringify({ status: 'completed' }) });
 })();

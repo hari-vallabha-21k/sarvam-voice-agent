@@ -12,6 +12,12 @@ function loadConfig(env = process.env) {
     port: parseInt(env.PORT || '3000', 10),
     dataFile: env.DATA_FILE || path.join(__dirname, '..', 'data', 'db.json'),
     webhookSecret: env.WEBHOOK_SECRET || '',
+    dashboardPassword: env.DASHBOARD_PASSWORD || '',
+    supabase: {
+      url: env.SUPABASE_URL || '',
+      key: env.SUPABASE_KEY || '',
+      appSecret: env.SUPABASE_APP_SECRET || '',
+    },
     restaurantName: env.RESTAURANT_NAME || 'SpiceGarden',
     timeZone: env.TIME_ZONE || 'Asia/Kolkata',
     seatCapacity: parseInt(env.SEAT_CAPACITY || '40', 10),

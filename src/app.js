@@ -64,9 +64,11 @@ function createApp({ store, config }) {
     const disposition = (call.disposition || '').toLowerCase();
     const result = { ok: true, call_id: call.call_id || null, order: null, booking: null };
 
-    let order = await store.findOrderByCall(call.call_id);
+    // place_order may already have run during the call. Sarvam hands back the
+    // order_id it saved from that response; call_id is the fallback match.
+    let order = (call.order_id && (await store.findOrder(call.order_id))) || (await store.findOrderByCall(call.call_id));
     if (order) {
-      // place_order already ran during the call; fill in anything we learnt later.
+      // Fill in anything we learnt later.
       const patch = {};
       for (const k of ['customer_name', 'customer_phone', 'delivery_address', 'call_summary']) {
         if (!order[k] && call[k]) patch[k] = call[k];

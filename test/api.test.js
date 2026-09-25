@@ -182,3 +182,19 @@ test('SupabaseStore sends the app secret and maps rows', async (t) => {
   assert.match(seen[1].url, /call_id=eq\.c%201/);
   assert.equal(JSON.parse(seen[2].opts.body).to_phone, '+91');
 });
+
+test('webhook matches the order place_order created via order_id and cancels it', async (t) => {
+  const { server, call } = await startServer();
+  t.after(() => server.close());
+  const placed = await call('POST', '/api/tools/place_order', { customer_name: 'Ravi', order_items: '1 Raita' });
+  const hook = await call('POST', '/api/sarvam/webhook', {
+    order_id: placed.body.order_id,
+    order_details: '1 Raita',
+    call_summary: 'Ordered raita, then cancelled',
+    disposition: 'order_cancelled',
+  });
+  assert.equal(hook.body.order.id, placed.body.order_id);
+  assert.equal(hook.body.order.status, 'cancelled');
+  assert.equal(hook.body.order.call_summary, 'Ordered raita, then cancelled');
+  assert.equal((await call('GET', '/api/orders')).body.orders.length, 1);
+});

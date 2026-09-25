@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SpiceGarden Orders</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><circle cx='16' cy='16' r='14' fill='%23c2410c'/></svg>" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <div>
+        <h1 id="restaurant-name">SpiceGarden</h1>
+        <p class="sub">Orders and bookings from the Sarvam voice agent</p>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <span class="live" id="live"><span class="dot" aria-hidden="true"></span><span id="live-text">Connecting…</span></span>
+      <button class="icon-btn" id="theme-toggle" type="button" aria-label="Toggle dark mode" title="Toggle dark mode">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <section class="kpis" aria-label="Order summary">
+      <article class="kpi">
+        <p class="kpi-label">Total orders</p>
+        <p class="kpi-value" id="kpi-total">–</p>
+        <p class="kpi-foot"><span id="kpi-today">–</span> today</p>
+      </article>
+      <article class="kpi kpi-cooking">
+        <p class="kpi-label"><span class="status-icon" aria-hidden="true">🔥</span>Cooking</p>
+        <p class="kpi-value" id="kpi-cooking">–</p>
+        <p class="kpi-foot">In the kitchen now</p>
+      </article>
+      <article class="kpi kpi-completed">
+        <p class="kpi-label"><span class="status-icon" aria-hidden="true">✓</span>Completed</p>
+        <p class="kpi-value" id="kpi-completed">–</p>
+        <p class="kpi-foot"><span id="kpi-cancelled">0</span> cancelled</p>
+      </article>
+      <article class="kpi">
+        <p class="kpi-label">Upcoming bookings</p>
+        <p class="kpi-value" id="kpi-bookings">–</p>
+        <p class="kpi-foot"><span id="kpi-bookings-today">0</span> today · <span id="kpi-calls">0</span> calls</p>
+      </article>
+    </section>
+
+    <section class="panel" aria-labelledby="orders-title">
+      <div class="panel-head">
+        <h2 id="orders-title">Order details</h2>
+        <div class="controls">
+          <div class="tabs" role="tablist" aria-label="Filter by status">
+            <button role="tab" class="tab" data-status="" aria-selected="true">All</button>
+            <button role="tab" class="tab" data-status="cooking" aria-selected="false">Cooking</button>
+            <button role="tab" class="tab" data-status="completed" aria-selected="false">Completed</button>
+            <button role="tab" class="tab" data-status="cancelled" aria-selected="false">Cancelled</button>
+          </div>
+          <input type="search" id="search" placeholder="Search order, customer or dish" aria-label="Search orders" />
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="orders">
+          <thead>
+            <tr>
+              <th scope="col">Order ID</th>
+              <th scope="col">Customer</th>
+              <th scope="col">Dish</th>
+              <th scope="col" class="num">Qty</th>
+              <th scope="col">Type</th>
+              <th scope="col" class="num">Total</th>
+              <th scope="col">Placed</th>
+              <th scope="col">Status</th>
+              <th scope="col"><span class="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody id="orders-body"></tbody>
+        </table>
+        <p class="empty" id="orders-empty" hidden>No orders yet. They appear here as soon as a Sarvam call ends.</p>
+      </div>
+    </section>
+
+    <section class="panel" aria-labelledby="bookings-title">
+      <div class="panel-head">
+        <h2 id="bookings-title">Table bookings</h2>
+      </div>
+      <div class="table-wrap">
+        <table class="bookings">
+          <thead>
+            <tr>
+              <th scope="col">Booking ID</th>
+              <th scope="col">Customer</th>
+              <th scope="col">Date</th>
+              <th scope="col">Time</th>
+              <th scope="col" class="num">Guests</th>
+              <th scope="col">Status</th>
+            </tr>
+          </thead>
+          <tbody id="bookings-body"></tbody>
+        </table>
+        <p class="empty" id="bookings-empty" hidden>No table bookings yet.</p>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

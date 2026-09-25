@@ -1,0 +1,16 @@
+{
+  "name": "sarvam-restaurant-dashboard",
+  "version": "1.0.0",
+  "description": "Restaurant order and booking dashboard with a Sarvam voice agent compatible API (tools + post-call webhook).",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test test/*.test.js",
+    "seed": "node scripts/seed.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT"
+}

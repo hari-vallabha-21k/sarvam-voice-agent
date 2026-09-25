@@ -6,8 +6,21 @@ mid-call tools, and the post-call webhook. Every step can be done from the
 Sarvam MCP (`configure_agent`, `create_api_tool`) or from the Sarvam dashboard.
 
 Production runs at `https://sarvam-voice-agent-teal.vercel.app` and the agent
-is already connected to it (`place_order` tool plus the `send_call_to_dashboard`
-on-end webhook). The steps below are the reference for rebuilding it.
+(version 3) is already connected to it:
+
+| Agent tool | When | Endpoint |
+|---|---|---|
+| `place_order` | After the caller confirms a food order | `POST /api/tools/place_order` |
+| `check_table_availability` | After date, time and guests are collected | `POST /api/tools/check_table_availability` |
+| `create_booking` | After the caller confirms the booking | `POST /api/tools/create_booking` |
+| `send_call_to_dashboard` | When every call ends (on_end) | `POST /api/sarvam/webhook` |
+
+All four send `Authorization: Bearer <WEBHOOK_SECRET>`. `place_order` saves the
+returned `order_id` and `create_booking` saves `booking_id`; the on-end webhook
+sends both back, so the call summary lands on the same order and booking.
+Booking tools take the date as the caller says it (today, tomorrow, saturday,
+27 September) and reply with a spoken `message`, used as the tool's
+`resp_template` (`{{message}}`). The steps below are the reference for rebuilding it.
 
 Replace `https://YOUR-HOST` with the public HTTPS URL where this server runs,
 and `YOUR_SECRET` with the value of `WEBHOOK_SECRET`.
@@ -100,8 +113,8 @@ Every response includes a `message` field. Set `resp_template` to
 | Tool | Method + URL | Body fields (source) |
 |---|---|---|
 | `get_menu` | `GET /api/tools/get_menu` | none |
-| `check_table_availability` | `POST /api/tools/check_table_availability` | `booking_date` (agent decides, YYYY-MM-DD), `booking_time` (agent decides, HH:MM 24h), `party_size` (agent decides, Number) |
-| `create_booking` | `POST /api/tools/create_booking` | `customer_name`, `customer_phone`, `booking_date`, `booking_time`, `party_size` (agent decides) |
+| `check_table_availability` | `POST /api/tools/check_table_availability` | `booking_date` (agent decides: today, tomorrow, saturday, 27 September or YYYY-MM-DD), `booking_time` (agent decides: 8 pm or 20:00), `party_size` (agent decides, Number) |
+| `create_booking` | `POST /api/tools/create_booking` | `customer_name`, `customer_phone`, `booking_date`, `booking_time`, `party_size`, `notes` (agent decides). Save `booking_id` to a `booking_id` variable |
 | `place_order` | `POST /api/tools/place_order` | `customer_name`, `customer_phone`, `order_type` (One of: dine-in, takeaway, delivery), `order_items` (agent decides: "2 x Veg Biryani, 1 x Raita"), `delivery_address` |
 | `send_confirmation_sms` | `POST /api/tools/send_confirmation_sms` | `customer_phone`, `customer_name` (agent decides) |
 

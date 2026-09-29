@@ -1,6 +1,7 @@
 // WhatsApp sender for the SpiceGarden dashboard.
 //   POST /send   {to, text}     Bearer WA_SERVICE_SECRET   -> sends a WhatsApp message
 //   GET  /status                Bearer WA_SERVICE_SECRET   -> {connected, hasQr}
+//   GET  /health               no auth; for uptime pingers (keeps a free host awake)
 //   GET  /link?key=SECRET       QR code page for linking the restaurant's number
 //   POST /logout                Bearer WA_SERVICE_SECRET   -> unlinks and clears the saved login
 import http from 'node:http';
@@ -74,6 +75,7 @@ http
   .createServer(async (req, res) => {
     const url = new URL(req.url, 'http://x');
     try {
+      if (req.method === 'GET' && url.pathname === '/health') return json(res, 200, { ok: true });
       if (req.method === 'GET' && url.pathname === '/link') {
         if (!safeEqual(url.searchParams.get('key') || '', WA_SERVICE_SECRET)) return json(res, 401, { error: 'unauthorized' });
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Refresh': '5' });

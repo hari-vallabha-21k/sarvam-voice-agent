@@ -22,3 +22,9 @@ selling widely.
 
 `POST /send {"to":"919811011111","text":"..."}` sends a message. Until it is
 linked it answers 503, and the dashboard app just logs the failure.
+
+## Free hosting for a demo
+Render's free plan sleeps after ~15 minutes without requests. Add a free
+UptimeRobot HTTP monitor on `https://<service-url>/health` every 5 minutes to
+keep it awake. The login lives in Supabase, so it reconnects after any restart.
+Use a paid plan (Render Starter, about $7/month) for real restaurants.

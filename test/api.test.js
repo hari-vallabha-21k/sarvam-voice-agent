@@ -359,3 +359,44 @@ test('orders move new -> cooking -> completed and a re-placed order keeps its st
   assert.equal(done.body.status, 'completed');
   assert.ok(done.body.completed_at);
 });
+
+test('whatsapp: order and booking confirmations go to the WhatsApp service without breaking the tool', async (t) => {
+  const sent = [];
+  const wa = http.createServer((req, res) => {
+    let raw = '';
+    req.on('data', (c) => (raw += c));
+    req.on('end', () => {
+      sent.push({ auth: req.headers.authorization, ...JSON.parse(raw) });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end('{"ok":true}');
+    });
+  });
+  await new Promise((r) => wa.listen(0, r));
+  const { server, store, call } = await startServer({ WA_SERVICE_URL: `http://127.0.0.1:${wa.address().port}`, WA_SERVICE_SECRET: 'wa-secret' });
+  t.after(() => { server.close(); wa.close(); });
+
+  const order = await call('POST', '/api/tools/place_order', { call_id: 'w1', customer_name: 'Ravi', customer_phone: '98110 11111', order_items: '2 x Paneer Butter Masala' });
+  assert.equal(order.status, 200);
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].to, '919811011111');
+  assert.equal(sent[0].auth, 'Bearer wa-secret');
+  assert.match(sent[0].text, /ORD-1001/);
+  assert.equal(store.data.sms[0].provider, 'whatsapp');
+
+  // Placing the same call's order again updates it and does not message twice.
+  await call('POST', '/api/tools/place_order', { call_id: 'w1', customer_name: 'Ravi', customer_phone: '98110 11111', order_items: '3 x Paneer Butter Masala' });
+  assert.equal(sent.length, 1);
+
+  // Service down: the tool still succeeds and the failure is logged.
+  wa.close();
+  const down = await call('POST', '/api/tools/place_order', { call_id: 'w2', customer_phone: '9811022222', order_items: '1 x Dal Makhani' });
+  assert.equal(down.status, 200);
+  assert.equal(store.data.sms.at(-1).status, 'unreachable');
+});
+
+test('whatsapp: phone number normalising', () => {
+  const { toWhatsAppNumber } = require('../src/whatsapp');
+  assert.equal(toWhatsAppNumber('+91 98110-11111'), '919811011111');
+  assert.equal(toWhatsAppNumber('09811011111'), '919811011111');
+  assert.equal(toWhatsAppNumber('12345'), null);
+});

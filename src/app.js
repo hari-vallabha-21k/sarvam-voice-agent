@@ -7,6 +7,7 @@ const crypto = require('node:crypto');
 const { MENU, GST_RATE } = require('./menu');
 const { normalizeCall, parseOrderItems, computeTotals, normalizeOrderType, toPartySize } = require('./sarvam');
 const { sendSms } = require('./sms');
+const { sendWhatsApp, orderMessage, bookingMessage } = require('./whatsapp');
 const { localDate } = require('./store');
 const { ACTIVE, freeTables, tableState } = require('./tables');
 
@@ -170,6 +171,7 @@ function createApp({ store, config }) {
       call_id: call.call_id || null,
       source: 'sarvam_tool',
     });
+    await notifyWhatsApp(booking.customer_phone, bookingMessage(config, booking), call.call_id);
     return { ...booking, booking_id: booking.id, message: confirmation(booking) };
   }
 
@@ -311,11 +313,24 @@ function createApp({ store, config }) {
     const order = existing
       ? await store.updateOrder(existing.id, existing.status === 'cancelled' ? { ...fields, status: 'new' } : fields)
       : await store.createOrder(fields);
+    // Only the first placement is announced; a re-placed order would spam the customer.
+    if (!existing) await notifyWhatsApp(order.customer_phone, orderMessage(config, order), call.call_id);
     return {
       ...order,
       order_id: order.id,
       message: `Order ${order.id} placed. Total is ${order.total} rupees including GST.`,
     };
+  }
+
+  // Best effort: a WhatsApp problem must never fail the order or booking the agent just made.
+  async function notifyWhatsApp(phone, text, callId) {
+    if (!phone) return;
+    try {
+      const result = await sendWhatsApp(config, phone, text);
+      await store.logSms({ to: phone, text, provider: result.provider, status: result.status, call_id: callId || null });
+    } catch (err) {
+      console.error('[whatsapp] notify failed:', err.message);
+    }
   }
 
   async function sendConfirmationSms(req, { body }) {

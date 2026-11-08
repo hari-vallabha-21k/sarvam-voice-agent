@@ -31,6 +31,16 @@ dashboard updates live.
 - No dependencies. Needs only Node.js 18 or newer. Data is stored in Supabase
   when `SUPABASE_URL` is set (production), otherwise in `data/db.json`.
 
+## Login and demo
+
+The dashboard has a sign-in page (`/login`). Staff sign in with `DASHBOARD_PASSWORD`
+(any username) or a named login from `DASHBOARD_USERS`, and stay signed in for 7 days
+(signed cookie; set `SESSION_SECRET`). Wrong passwords are throttled. Scripts can
+still use HTTP Basic auth. For a demo, set `DEMO_LOGIN=user:password` (it must be a
+real login) and the login page shows it with a "Fill in for me" button. `/demo` is an
+open demo guide with what to say to the agent, the menu and a checklist. Remove
+`DEMO_LOGIN` after the demo.
+
 ## Run it
 
 ```bash

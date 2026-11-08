@@ -25,6 +25,10 @@ function loadConfig(env = process.env) {
     webhookSecret: env.WEBHOOK_SECRET || '',
     dashboardPassword: env.DASHBOARD_PASSWORD || '',
     dashboardUsers: parseUsers(env.DASHBOARD_USERS || ''),
+    // Signs the login cookie. Falls back to a value derived from the other secrets.
+    sessionSecret: env.SESSION_SECRET || ['session', env.DASHBOARD_PASSWORD, env.DASHBOARD_USERS, env.WEBHOOK_SECRET].join('|'),
+    // "user:password" shown on the login page for demos (must be a real login). Leave empty in production.
+    demoLogin: env.DEMO_LOGIN || '',
     supabase: {
       url: env.SUPABASE_URL || '',
       key: env.SUPABASE_KEY || '',

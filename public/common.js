@@ -22,6 +22,8 @@ window.Dash = (function () {
       throw new Error('No connection. Check the internet and try again.');
     }
     const data = await res.json().catch(() => ({}));
+    // Session ended (cookie expired): back to the login form.
+    if (res.status === 401) location.href = '/login?next=' + encodeURIComponent(location.pathname);
     if (!res.ok) {
       const err = new Error(res.status < 500 && data.error ? data.error : 'Something went wrong on the server. Please try again.');
       err.status = res.status;
@@ -95,6 +97,13 @@ window.Dash = (function () {
       const saved = localStorage.getItem('theme');
       if (saved) root.dataset.theme = saved;
     } catch (_) {}
+    const logout = $('logout');
+    if (logout) {
+      logout.addEventListener('click', async () => {
+        try { await fetch('/api/logout', { method: 'POST' }); } catch (_) {}
+        location.href = '/login';
+      });
+    }
     const toggle = $('theme-toggle');
     if (toggle) {
       toggle.addEventListener('click', () => {

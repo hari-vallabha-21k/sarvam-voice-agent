@@ -7,6 +7,7 @@ const crypto = require('node:crypto');
 const { MENU, GST_RATE } = require('./menu');
 const { normalizeCall, parseOrderItems, computeTotals, normalizeOrderType, toPartySize } = require('./sarvam');
 const { sendSms } = require('./sms');
+const { createSession, readSession, cookieHeader } = require('./session');
 const { sendWhatsApp, orderMessage, bookingMessage } = require('./whatsapp');
 const { localDate } = require('./store');
 const { ACTIVE, freeTables, tableState } = require('./tables');
@@ -63,6 +64,12 @@ function createApp({ store, config }) {
     ['GET', '/api/tables', listTables],
     ['GET', '/api/calls', listCalls],
     ['GET', '/api/health', () => ({ ok: true })],
+
+    // Login page support (public)
+    ['GET', '/api/login-info', loginInfo],
+    ['POST', '/api/login', login],
+    ['POST', '/api/logout', logout],
+    ['GET', '/api/me', (req) => ({ ok: true, user: sessionUser(req) })],
   ];
 
   function requireSecret(handler) {
@@ -514,22 +521,63 @@ function createApp({ store, config }) {
 
   // ---------- Dashboard login ----------
 
-  // Sarvam endpoints use WEBHOOK_SECRET instead, and /api/health stays open for uptime checks.
+  // Sarvam endpoints use WEBHOOK_SECRET instead; health, the login page and the demo guide stay open.
   function isPublicPath(pathname) {
-    return pathname.startsWith('/api/sarvam/') || pathname.startsWith('/api/tools/') || pathname === '/api/health';
+    return (
+      pathname.startsWith('/api/sarvam/') ||
+      pathname.startsWith('/api/tools/') ||
+      ['/api/health', '/api/login-info', '/api/login', '/api/logout', '/login', '/demo', '/styles.css', '/login.css', '/login.js'].includes(pathname)
+    );
   }
 
-  // HTTP Basic auth: any username with DASHBOARD_PASSWORD, or a named login from
-  // DASHBOARD_USERS. Off when neither is set.
+  const authOff = () => !config.dashboardPassword && !config.dashboardUsers.size;
+
+  // Valid username/password pair: any username with DASHBOARD_PASSWORD, or a named login from DASHBOARD_USERS.
+  function checkCredentials(user, password) {
+    if (config.dashboardPassword && safeEqual(password, config.dashboardPassword)) return true;
+    return config.dashboardUsers.has(user) && safeEqual(password, config.dashboardUsers.get(user));
+  }
+
+  function sessionUser(req) {
+    if (authOff()) return 'guest';
+    return readSession(config.sessionSecret, req.headers.cookie);
+  }
+
+  // Login cookie from the login page, or HTTP Basic auth for scripts. Off when no password is set.
   function dashboardAuthorized(req) {
-    if (!config.dashboardPassword && !config.dashboardUsers.size) return true;
+    if (authOff() || sessionUser(req)) return true;
     const m = (req.headers.authorization || '').match(/^Basic\s+(.+)$/i);
     if (!m) return false;
     const decoded = Buffer.from(m[1], 'base64').toString('utf8');
-    const user = decoded.slice(0, decoded.indexOf(':'));
-    const password = decoded.slice(decoded.indexOf(':') + 1);
-    if (config.dashboardPassword && safeEqual(password, config.dashboardPassword)) return true;
-    return config.dashboardUsers.has(user) && safeEqual(password, config.dashboardUsers.get(user));
+    return checkCredentials(decoded.slice(0, decoded.indexOf(':')), decoded.slice(decoded.indexOf(':') + 1));
+  }
+
+  const failures = new Map(); // ip -> { count, until }; best effort, resets when the function restarts
+  const clientIp = (req) => String(req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+
+  function loginInfo() {
+    const i = config.demoLogin.indexOf(':');
+    const demo = i > 0 ? { user: config.demoLogin.slice(0, i), password: config.demoLogin.slice(i + 1) } : null;
+    return { ok: true, restaurant: config.restaurantName, authRequired: !authOff(), demo };
+  }
+
+  function login(req, { body }) {
+    const ip = clientIp(req);
+    const f = failures.get(ip);
+    if (f && f.count >= 8 && f.until > Date.now()) throw new HttpError(429, 'Too many attempts. Wait a few minutes and try again.');
+    const user = String(body.username || '').trim();
+    if (!checkCredentials(user, String(body.password || ''))) {
+      failures.set(ip, { count: (f && f.until > Date.now() ? f.count : 0) + 1, until: Date.now() + 5 * 60 * 1000 });
+      throw new HttpError(401, 'Wrong username or password.');
+    }
+    failures.delete(ip);
+    const secure = req.headers['x-forwarded-proto'] === 'https';
+    return new RawResponse(200, { 'Content-Type': 'application/json; charset=utf-8', 'Set-Cookie': cookieHeader(createSession(config.sessionSecret, user || 'staff'), { secure }) }, '{"ok":true}');
+  }
+
+  function logout(req) {
+    const secure = req.headers['x-forwarded-proto'] === 'https';
+    return new RawResponse(200, { 'Content-Type': 'application/json; charset=utf-8', 'Set-Cookie': cookieHeader('', { secure, maxAge: 0 }) }, '{"ok":true}');
   }
 
   // ---------- HTTP plumbing ----------
@@ -545,7 +593,11 @@ function createApp({ store, config }) {
     try {
       if (req.method === 'OPTIONS') return send(res, 204, null);
       if (!isPublicPath(url.pathname) && !dashboardAuthorized(req)) {
-        res.setHeader('WWW-Authenticate', `Basic realm="${config.restaurantName} dashboard", charset="UTF-8"`);
+        // Browsers asking for a page go to the login form; API calls get a plain 401.
+        if (req.method === 'GET' && !url.pathname.startsWith('/api/')) {
+          res.writeHead(302, { Location: '/login?next=' + encodeURIComponent(url.pathname + url.search) });
+          return res.end();
+        }
         return send(res, 401, { ok: false, error: 'Login required' });
       }
       const match = compiled.find((r) => r.method === req.method && r.re.test(url.pathname));

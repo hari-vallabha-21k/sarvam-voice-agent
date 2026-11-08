@@ -400,3 +400,42 @@ test('whatsapp: phone number normalising', () => {
   assert.equal(toWhatsAppNumber('09811011111'), '919811011111');
   assert.equal(toWhatsAppNumber('12345'), null);
 });
+
+test('login page: cookie session, redirects, logout and demo hint', async (t) => {
+  const env = { DASHBOARD_USERS: 'demo:letmein', DEMO_LOGIN: 'demo:letmein', SESSION_SECRET: 'x'.repeat(32) };
+  const { server } = await startServer(env);
+  t.after(() => server.close());
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const req = (path, opts = {}) => fetch(base + path, { redirect: 'manual', ...opts });
+  const post = (path, body, headers = {}) => req(path, { method: 'POST', headers: { 'Content-Type': 'application/json', ...headers }, body: JSON.stringify(body) });
+
+  // Pages redirect to the login form, API calls get 401, the login page itself is open.
+  const page = await req('/tables');
+  assert.equal(page.status, 302);
+  assert.equal(page.headers.get('location'), '/login?next=%2Ftables');
+  assert.equal((await req('/api/stats')).status, 401);
+  assert.equal((await req('/login')).status, 200);
+  assert.equal((await req('/demo')).status, 200);
+  assert.deepEqual((await (await req('/api/login-info')).json()).demo, { user: 'demo', password: 'letmein' });
+
+  // Wrong password, then the right one sets a cookie that opens everything.
+  assert.equal((await post('/api/login', { username: 'demo', password: 'nope' })).status, 401);
+  const ok = await post('/api/login', { username: 'demo', password: 'letmein' });
+  assert.equal(ok.status, 200);
+  const cookie = ok.headers.get('set-cookie');
+  assert.match(cookie, /HttpOnly/);
+  const session = cookie.split(';')[0];
+  assert.equal((await req('/api/stats', { headers: { Cookie: session } })).status, 200);
+  assert.equal((await req('/tables', { headers: { Cookie: session } })).status, 200);
+
+  // A tampered cookie is rejected, and logout clears it.
+  assert.equal((await req('/api/stats', { headers: { Cookie: session.slice(0, -2) + 'zz' } })).status, 401);
+  assert.match((await post('/api/logout', {})).headers.get('set-cookie'), /Max-Age=0/);
+});
+
+test('login page: too many wrong passwords are throttled', async (t) => {
+  const { server, call } = await startServer({ DASHBOARD_PASSWORD: 'pw' });
+  t.after(() => server.close());
+  for (let i = 0; i < 8; i += 1) assert.equal((await call('POST', '/api/login', { password: 'bad' })).status, 401);
+  assert.equal((await call('POST', '/api/login', { password: 'pw' })).status, 429);
+});

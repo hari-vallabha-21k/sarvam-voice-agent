@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sign in · SpiceGarden</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='9' fill='%239d1c20'/></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,600;0,700;1,600&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" />
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/login.css" />
+</head>
+<body class="login-body">
+  <main class="login-card">
+    <span class="brand-mark" aria-hidden="true">SG</span>
+    <h1 id="rest-name">SpiceGarden</h1>
+    <p class="login-sub">Sign in to see your orders, tables and calls.</p>
+
+    <form id="form" novalidate>
+      <label for="username">Username</label>
+      <input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" />
+      <label for="password">Password</label>
+      <div class="pw-row">
+        <input id="password" name="password" type="password" autocomplete="current-password" required />
+        <button type="button" class="btn btn-quiet" id="show" aria-pressed="false">Show</button>
+      </div>
+      <p class="login-error" id="error" role="alert" hidden></p>
+      <button class="btn btn-primary login-submit" id="submit" type="submit">Sign in</button>
+    </form>
+
+    <aside class="demo-box" id="demo-box" hidden>
+      <strong>Demo access</strong>
+      <p>Username <code id="demo-user"></code> &middot; Password <code id="demo-pass"></code></p>
+      <button type="button" class="btn btn-outline" id="demo-fill">Fill in for me</button>
+    </aside>
+    <p class="login-foot"><a href="/demo">Demo guide: what to show and say</a></p>
+  </main>
+  <script src="/login.js"></script>
+</body>
+</html>

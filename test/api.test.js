@@ -402,7 +402,7 @@ test('whatsapp: phone number normalising', () => {
 });
 
 test('login page: cookie session, redirects, logout and demo hint', async (t) => {
-  const env = { DASHBOARD_USERS: 'demo:letmein', DEMO_LOGIN: 'demo:letmein', SESSION_SECRET: 'x'.repeat(32) };
+  const env = { DEMO_LOGIN: 'demo:letmein', SESSION_SECRET: 'x'.repeat(32) };
   const { server } = await startServer(env);
   t.after(() => server.close());
   const base = `http://127.0.0.1:${server.address().port}`;

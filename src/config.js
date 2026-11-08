@@ -19,16 +19,21 @@ function parseUsers(s) {
 }
 
 function loadConfig(env = process.env) {
+  const dashboardUsers = parseUsers(env.DASHBOARD_USERS || '');
+  // DEMO_LOGIN is a login in its own right, so it is the only setting a demo needs.
+  const demoLogin = env.DEMO_LOGIN || '';
+  const di = demoLogin.indexOf(':');
+  if (di > 0) dashboardUsers.set(demoLogin.slice(0, di).trim(), demoLogin.slice(di + 1).trim());
   return {
     port: parseInt(env.PORT || '3000', 10),
     dataFile: env.DATA_FILE || path.join(__dirname, '..', 'data', 'db.json'),
     webhookSecret: env.WEBHOOK_SECRET || '',
     dashboardPassword: env.DASHBOARD_PASSWORD || '',
-    dashboardUsers: parseUsers(env.DASHBOARD_USERS || ''),
+    dashboardUsers,
     // Signs the login cookie. Falls back to a value derived from the other secrets.
     sessionSecret: env.SESSION_SECRET || ['session', env.DASHBOARD_PASSWORD, env.DASHBOARD_USERS, env.WEBHOOK_SECRET].join('|'),
-    // "user:password" shown on the login page for demos (must be a real login). Leave empty in production.
-    demoLogin: env.DEMO_LOGIN || '',
+    // "user:password" shown on the login page for demos (also works as a login). Leave empty in production.
+    demoLogin,
     supabase: {
       url: env.SUPABASE_URL || '',
       key: env.SUPABASE_KEY || '',

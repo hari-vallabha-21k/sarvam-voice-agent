@@ -38,8 +38,8 @@ The dashboard has a sign-in page (`/login`). Staff sign in with `DASHBOARD_PASSW
 (signed cookie; set `SESSION_SECRET`). Wrong passwords are throttled. Scripts can
 still use HTTP Basic auth. For a demo, set `DEMO_LOGIN=user:password` (it also works as a
 login) and the login page shows it with a "Fill in for me" button. `/demo` is an
-open demo guide with what to say to the agent, the menu and a checklist. Remove
-`DEMO_LOGIN` after the demo.
+open demo guide with what to say to the agent, the menu and a checklist. The app ships with the demo login `test` /
+`spicegarden2026` built in; set `DEMO_LOGIN` to change it or `DEMO_LOGIN=off` to remove it.
 
 ## Run it
 
